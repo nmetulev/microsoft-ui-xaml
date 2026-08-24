@@ -103,6 +103,7 @@
         <ClCompile Include="..\DragUIOverride_partial.cpp"/>
         <ClCompile Include="..\DragStartingEventArgs_Partial.cpp"/>
         <ClCompile Include="..\XamlBindingHelperFactory_partial.cpp"/>
+        <ClCompile Include="..\XamlBindScopeAttach.cpp"/>
         <ClCompile Include="..\TargetPropertyPath_Partial.cpp"/>
         <ClCompile Include="..\TryStartConnectedAnimationOperation.cpp"/>
         <ClCompile Include="..\ElementCompositionPreview.cpp"/>
