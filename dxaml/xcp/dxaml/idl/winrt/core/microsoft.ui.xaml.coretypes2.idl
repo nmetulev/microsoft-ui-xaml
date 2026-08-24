@@ -2134,6 +2134,16 @@ namespace Microsoft.UI.Xaml.Markup
 
     [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
     [webhosthidden]
+    interface IXamlBindScopeManifest
+    {
+        Int32 RootConnectionId{ get; };
+        Int32[] GetRequiredConnectionIds();
+        String ScopeRevision{ get; };
+        String ExpectedBaseTreeRevision{ get; };
+    };
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
     interface IXamlBindScopeLifecycle
     {
         void InitializeScope();
@@ -2173,6 +2183,8 @@ namespace Microsoft.UI.Xaml.Markup
         DesyncScopeState = 14,
         DesyncBaseTree = 15,
         ScopeLifecycleUnsupported = 16,
+        ScopeManifestUnavailable = 17,
+        ManifestIncomplete = 18,
     };
 
     [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
@@ -2321,24 +2333,18 @@ namespace Microsoft.UI.Xaml.Markup
             static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult TryAttachBindingScope(
                 Microsoft.UI.Xaml.DependencyObject root,
                 Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-                Int32 rootConnectionId,
                 Int32[] targetConnectionIds,
                 String[] targetStableNames,
                 String[] targetTypeNames,
-                Object[] targetObjects,
-                String expectedBaseTreeRevision,
-                String scopeRevision);
+                Object[] targetObjects);
 
             static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult ReplaceBindingScope(
                 Microsoft.UI.Xaml.DependencyObject root,
                 Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-                Int32 rootConnectionId,
                 Int32[] targetConnectionIds,
                 String[] targetStableNames,
                 String[] targetTypeNames,
-                Object[] targetObjects,
-                String expectedBaseTreeRevision,
-                String scopeRevision);
+                Object[] targetObjects);
 
             static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult DetachBindingScope(Microsoft.UI.Xaml.DependencyObject root);
             static Microsoft.UI.Xaml.Markup.IComponentConnector GetAttachedBindingScope(Microsoft.UI.Xaml.DependencyObject root);

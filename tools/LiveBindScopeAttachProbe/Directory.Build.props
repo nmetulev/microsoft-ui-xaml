@@ -1,0 +1,7 @@
+<!-- Stops MSBuild property inheritance from the repository root.
+
+     This probe is a standalone Windows App SDK app that builds against the shipping SDK from
+     nuget.org. It is deliberately not part of any repository solution or build, and it must not pick
+     up the product build's properties. Nothing in the repository references it. -->
+<Project>
+</Project>

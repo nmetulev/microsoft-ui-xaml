@@ -1,0 +1,79 @@
+=== LiveBindScopeProbe ===
+LANE: app-level simulation of the proposed runtime API.
+      Proves API semantics and external generated-connector viability.
+      Does NOT prove a public runtime hook exists; the shipped WinUI runtime is unmodified.
+pid=22928
+process=C:\Users\nikolame\.copilot\session-state\f2399b3c-cd73-4391-b669-a6a367b9a891\files\probe\Probe\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\LiveBindScopeProbe.exe
+scopeAssembly=C:\Users\nikolame\.copilot\session-state\f2399b3c-cd73-4391-b669-a6a367b9a891\files\probe\Probe\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\ProbeScope.dll
+scopeAssemblyMvid=7b0699ef-4dd8-41e4-a795-863fef999097
+appAssembly=C:\Users\nikolame\.copilot\session-state\f2399b3c-cd73-4391-b669-a6a367b9a891\files\probe\Probe\bin\x64\Release\net8.0-windows10.0.19041.0\win-x64\LiveBindScopeProbe.dll
+oracleBaseUri=ms-appx:///OraclePage.xaml
+subjectBaseUri=ms-appx:///SubjectPage.xaml
+baseTreeRevision(test token)=basetree@gen7(test-token)
+durationMs=196
+
+ID     RESULT CASE                                                      
+----------------------------------------------------------------------------------------------------
+N04    PASS   stale base tree refused before mutation                   
+       expected: Refused/BaseTreeRevisionMismatch, 0 connects, no ownership
+       observed: Refused/BaseTreeRevisionMismatch base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='' owner=0 connected=0 detached=0 failedId=-1; connects=0; owner=<null>
+N02    PASS   same-typed target swap refused on identity, not cast      
+       expected: Refused/TargetIdentityMismatch, 0 connects, while both casts succeed
+       observed: Refused/TargetIdentityMismatch base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='' owner=0 connected=0 detached=0 failedId=2; connects=0; castsSucceed=True
+N01    PASS   incomplete target map refused                             
+       expected: Refused/ManifestIncomplete on id 4, 0 connects
+       observed: Refused/ManifestIncomplete base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='' owner=0 connected=0 detached=0 failedId=4; connects=0
+N05    PASS   inert scope refused instead of reported attached          
+       expected: Refused/ScopeLifecycleUnsupported, no ownership
+       observed: Refused/ScopeLifecycleUnsupported base='basetree@gen7(test-token)' req='scope@inert' applied='' owner=0 connected=0 detached=0 failedId=1; owner=<null>
+N06    PASS   target from another live instance refused                 
+       expected: Refused/TargetOutsideNamescope, 0 connects
+       observed: Refused/TargetOutsideNamescope base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='' owner=0 connected=0 detached=0 failedId=2; connects=0
+T01a   PASS   attach reported truthfully                                
+       expected: Attached/None, 4 targets, non-zero ownership id, revisions echoed
+       observed: Attached/None base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='scope@v1:title->Title,alt->Subtitle,list->Items' owner=1 connected=4 detached=0 failedId=-1
+T01b   PASS   initial population matches oracle                         
+       expected: title='title-0' alt='subtitle-0' ItemsSource identical to VM.Items
+       observed: title='title-0' alt='subtitle-0' itemsSourceIsVmItems=True
+T02    PASS   ObservableCollection mutation flows                       
+       expected: oracle and subject both show 3 items
+       observed: oracle=3 subject=3
+T03    PASS   property change flows                                     
+       expected: both show title-1
+       observed: oracle='title-1' subject='title-1'
+T04    PASS   ViewModel replacement stays reactive                      
+       expected: both show title-2 and ItemsSource follows the new VM
+       observed: oracle='title-2' subject='title-2' itemsSourceFollowed=True
+T04b   PASS   new ViewModel drives, old one is released                 
+       expected: subject shows title-3
+       observed: subject='title-3'
+T07    PASS   repeat attach is refused and never duplicates writers     
+       expected: AlreadyAttached, same ownership id and same scope object, 0 connects, exactly 1 write per change
+       observed: AlreadyAttached/ScopeRevisionAlreadyApplied base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='scope@v1:title->Title,alt->Subtitle,list->Items' owner=1 connected=0 detached=0 failedId=-1; ownerBefore=1; sameScope=True; connects=0; writesPerChange=1
+T07b   PASS   different revision refused by plain attach, names the scope dimension
+       expected: Refused/ScopeRevisionConflict with both revisions reported
+       observed: Refused/ScopeRevisionConflict base='basetree@gen7(test-token)' req='scope@v2:title->Subtitle,alt->Title,list->Items' applied='scope@v1:title->Title,alt->Subtitle,list->Items' owner=1 connected=0 detached=0 failedId=-1
+T07c   PASS   base fault dominates a simultaneous scope fault           
+       expected: Refused/BaseTreeRevisionMismatch, not ScopeRevisionConflict
+       observed: Refused/BaseTreeRevisionMismatch base='basetree@gen7(test-token)' req='scope@v2:title->Subtitle,alt->Title,list->Items' applied='scope@v1:title->Title,alt->Subtitle,list->Items' owner=1 connected=0 detached=0 failedId=-1
+T05    PASS   path replacement takes over and the old path stops writing
+       expected: Replaced, 4 detached, new ownership id, title shows Subtitle and alt shows Title
+       observed: Replaced/None base='basetree@gen7(test-token)' req='scope@v2:title->Subtitle,alt->Title,list->Items' applied='scope@v2:title->Subtitle,alt->Title,list->Items' owner=2 connected=4 detached=4 failedId=-1; title='subtitle-5' alt='title-5' before='title-4'
+N03    PASS   skipping detach produces duplicate writers                
+       expected: more than one write to the same target for one logical change
+       observed: writes=4 finalTitle='title-6'
+T06    PASS   detach clears ownership and leaves no writer              
+       expected: Detached, ownership cleared, target frozen at its last value
+       observed: Detached/None base='basetree@gen7(test-token)' req='' applied='scope@v2:title->Subtitle,alt->Title,list->Items' owner=0 connected=0 detached=4 failedId=-1; owner=<null>; title='title-6' expected='title-6'
+T06b   PASS   second detach is a refusal, not a success                 
+       expected: Refused/NothingAttached
+       observed: Refused/NothingAttached base='basetree@gen7(test-token)' req='' applied='' owner=0 connected=0 detached=0 failedId=-1
+T08a   PASS   current page is the same instance in the same process     
+       expected: same object, still parented
+       observed: pid=22928 sameInstance=True
+T08b   PASS   cached, never-parented instance attaches and stays live   
+       expected: Attached, 4 targets, same instance, updates flow off-tree
+       observed: Attached/None base='basetree@gen7(test-token)' req='scope@v1:title->Title,alt->Subtitle,list->Items' applied='scope@v1:title->Title,alt->Subtitle,list->Items' owner=3 connected=4 detached=0 failedId=-1; title='cached-title-1' sameInstance=True
+----------------------------------------------------------------------------------------------------
+total=20 passed=20 failed=0
+OVERALL: PASS
