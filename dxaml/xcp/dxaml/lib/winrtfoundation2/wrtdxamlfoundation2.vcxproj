@@ -20,6 +20,7 @@
 
         <ProjectIncludeDirectories>
             $(ProjectIncludeDirectories);
+            $(XcpPath)\components\bindscope\inc;
             $(XcpPath)\components\collection\inc;
             $(XcpPath)\components\comptree\inc;
             $(XcpPath)\components\transforms\inc;
@@ -140,6 +141,7 @@
         <ProjectReference Include="$(XcpPath)\dxaml\idl\com\microsoft.ui.xaml-com.vcxproj" Project="{a1eb01c3-ac8b-45a8-97c8-c459b77ed690}"/>
         <ProjectReference Include="$(XamlDiagPath)\idl\xamlom.vcxproj" Project="{c6e1e90c-ee33-4352-a8de-067b013c7cc9}"/>
         <ProjectReference Include="..\winrtpch\wrtdxamlpch.vcxproj" Project="{845d8296-bec7-4e97-8da9-db26a3a6d8c9}"/>
+        <ProjectReference Include="$(XcpPath)\components\bindscope\lib\Microsoft.UI.Xaml.BindScope.vcxproj" Project="{0eb0a782-b70f-4bcf-8983-338725ba3590}"/>
     </ItemGroup>
 
     <Import Project="$([MSBuild]::GetPathOfFileAbove(Microsoft.UI.Xaml.Build.targets))" />

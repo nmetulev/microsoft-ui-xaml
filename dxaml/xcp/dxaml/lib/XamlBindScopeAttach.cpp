@@ -8,92 +8,312 @@
 
 using namespace DirectUI;
 
-namespace
+namespace {
+
+// -------------------------------------------------------------------------------------------
+// ABI marshalling helpers.
+// -------------------------------------------------------------------------------------------
+
+std::wstring ToWString(_In_opt_ HSTRING value)
 {
-    // COM identity. A successful QueryInterface to a shared interface proves nothing about which
-    // element a manifest row refers to, so identity is always compared on IUnknown.
-    bool IsSameInstance(_In_opt_ IInspectable* a, _In_opt_ IInspectable* b)
+    UINT32 length = 0;
+    const wchar_t* buffer = WindowsGetStringRawBuffer(value, &length);
+    return buffer == nullptr ? std::wstring() : std::wstring(buffer, length);
+}
+
+// xstring_ptr::Promote has no HSTRING overload; it promotes to xstring_ptr_storage, xstring_ptr or
+// xruntime_string_ptr. Go through xruntime_string_ptr, which owns a real runtime string handle, and
+// hand ownership of that handle to the caller.
+_Check_return_ HRESULT ToHString(const std::wstring& value, _Out_ HSTRING* result)
+{
+    *result = nullptr;
+    if (value.empty())
     {
-        if (a == b) { return true; }
-        if (!a || !b) { return false; }
-
-        ctl::ComPtr<IUnknown> left;
-        ctl::ComPtr<IUnknown> right;
-        if (FAILED(a->QueryInterface(IID_PPV_ARGS(&left)))) { return false; }
-        if (FAILED(b->QueryInterface(IID_PPV_ARGS(&right)))) { return false; }
-        return left.Get() == right.Get();
-    }
-
-    bool IsEmpty(_In_opt_ HSTRING value)
-    {
-        return WindowsGetStringLen(value) == 0;
-    }
-
-    bool StringsEqual(_In_opt_ HSTRING a, _In_opt_ HSTRING b)
-    {
-        INT32 comparison = 0;
-        return SUCCEEDED(WindowsCompareStringOrdinal(a, b, &comparison)) && comparison == 0;
-    }
-
-    void Refuse(
-        _Out_ XamlBindScopeAttach::Result* result,
-        XamlBindScopeAttach::Detail detail,
-        INT32 failedConnectionId = -1)
-    {
-        result->Status = XamlBindScopeAttach::Status::XamlBindScopeAttachStatus_Refused;
-        result->FailureDetail = detail;
-        result->TargetsConnected = 0;
-        result->FailedConnectionId = failedConnectionId;
-    }
-
-    // xstring_ptr::Promote has no HSTRING overload; it promotes to xstring_ptr_storage, xstring_ptr
-    // or xruntime_string_ptr. Go through xruntime_string_ptr, which owns a real runtime string
-    // handle, and hand ownership of that handle to the caller.
-    _Check_return_ HRESULT PromoteToHString(_In_ const xstring_ptr& source, _Out_ HSTRING* result)
-    {
-        *result = nullptr;
-        if (source.IsNullOrEmpty())
-        {
-            return S_OK;
-        }
-
-        xruntime_string_ptr runtimeString;
-        IFC_RETURN(source.Promote(&runtimeString));
-        *result = runtimeString.DetachHSTRING();
         return S_OK;
     }
+    return WindowsCreateString(value.c_str(), static_cast<UINT32>(value.size()), result);
+}
 
-    // A row that survived preflight: connection id plus the single live object it refers to.
-    struct ResolvedRow
+CDependencyObject* HandleOf(_In_opt_ IInspectable* value)
+{
+    if (!value)
     {
-        INT32 ConnectionId = -1;
-        ctl::ComPtr<IInspectable> Target;
-    };
+        return nullptr;
+    }
+
+    ctl::ComPtr<xaml::IDependencyObject> asDO;
+    if (FAILED(ctl::ComPtr<IInspectable>(value).As(&asDO)) || !asDO)
+    {
+        return nullptr;
+    }
+    return static_cast<DependencyObject*>(asDO.Get())->GetHandle();
 }
 
-std::unordered_map<CDependencyObject*, XamlBindScopeRecord>& XamlBindScopeAttach::Records()
+// -------------------------------------------------------------------------------------------
+// The real host. Every method here is one runtime primitive; there is no policy in this file.
+// -------------------------------------------------------------------------------------------
+
+class RuntimeScopeHost final : public BindScope::IScopeHost
 {
-    static thread_local std::unordered_map<CDependencyObject*, XamlBindScopeRecord> records;
-    return records;
+public:
+    BindScope::ScopeObject ResolveName(BindScope::ScopeObject root, const std::wstring& name) override
+    {
+        DXamlCore* core = DXamlCore::GetCurrent();
+        if (!core)
+        {
+            return nullptr;
+        }
+
+        CDependencyObject* rootHandle = HandleOf(static_cast<IInspectable*>(root));
+        if (!rootHandle)
+        {
+            return nullptr;
+        }
+
+        // Namescope lookup, not a tree walk. The namescope exists from parse time, so this resolves
+        // inside a root that was constructed but never realized.
+        wrl_wrappers::HString nameString;
+        if (FAILED(WindowsCreateString(name.c_str(), static_cast<UINT32>(name.size()), nameString.GetAddressOf())))
+        {
+            return nullptr;
+        }
+
+        auto named = core->GetHandle()->TryGetElementByName(xephemeral_string_ptr(nameString.Get()), rootHandle);
+        if (!named)
+        {
+            return nullptr;
+        }
+
+        ctl::ComPtr<DependencyObject> peer;
+        if (FAILED(core->GetPeer(named.get(), &peer)) || !peer)
+        {
+            return nullptr;
+        }
+
+        // The engine only ever compares these and hands them back to the connector, so a raw,
+        // non-owning pointer is correct: the tree owns the element for the duration of the call.
+        return static_cast<BindScope::ScopeObject>(ctl::as_iinspectable(peer.Get()));
+    }
+
+    BindScope::ScopeObject GetNamescopeOwner(BindScope::ScopeObject target) override
+    {
+        CDependencyObject* targetHandle = HandleOf(static_cast<IInspectable*>(target));
+        if (!targetHandle)
+        {
+            return nullptr;
+        }
+
+        CDependencyObject* owner = targetHandle->GetStandardNameScopeOwner();
+        if (!owner)
+        {
+            return nullptr;
+        }
+
+        ctl::ComPtr<IInspectable> ownerPeer;
+        if (FAILED(DXamlServices::TryGetPeer(owner, IID_PPV_ARGS(&ownerPeer))) || !ownerPeer)
+        {
+            return nullptr;
+        }
+        return static_cast<BindScope::ScopeObject>(ownerPeer.Get());
+    }
+
+    // COM identity. A successful QueryInterface to a shared interface proves nothing about which
+    // element a manifest row refers to, so identity is always compared on IUnknown.
+    bool IsSameInstance(BindScope::ScopeObject left, BindScope::ScopeObject right) override
+    {
+        if (left == right)
+        {
+            return true;
+        }
+        if (!left || !right)
+        {
+            return false;
+        }
+
+        ctl::ComPtr<IUnknown> leftUnknown;
+        ctl::ComPtr<IUnknown> rightUnknown;
+        if (FAILED(static_cast<IInspectable*>(left)->QueryInterface(IID_PPV_ARGS(&leftUnknown)))) { return false; }
+        if (FAILED(static_cast<IInspectable*>(right)->QueryInterface(IID_PPV_ARGS(&rightUnknown)))) { return false; }
+        return leftUnknown.Get() == rightUnknown.Get();
+    }
+
+    bool TypeNameEquals(BindScope::ScopeObject target, const std::wstring& expectedTypeName) override
+    {
+        wrl_wrappers::HString actual;
+        if (FAILED(static_cast<IInspectable*>(target)->GetRuntimeClassName(actual.GetAddressOf())))
+        {
+            return false;
+        }
+        return ToWString(actual.Get()) == expectedTypeName;
+    }
+
+    std::wstring GetBaseTreeRevision(BindScope::ScopeObject root) override
+    {
+        CDependencyObject* rootHandle = HandleOf(static_cast<IInspectable*>(root));
+        if (!rootHandle)
+        {
+            return std::wstring();
+        }
+
+        auto& revisions = BaseTreeRevisions();
+        auto found = revisions.find(rootHandle);
+        return found == revisions.end() ? std::wstring() : found->second;
+    }
+
+    bool TryGetManifest(BindScope::ScopeObject connector, BindScope::ScopeManifest* manifest) override
+    {
+        ctl::ComPtr<xaml_markup::IXamlBindScopeManifest> manifestInterface;
+        if (FAILED(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(connector)).As(&manifestInterface)) || !manifestInterface)
+        {
+            return false;
+        }
+
+        INT32 rootConnectionId = -1;
+        if (FAILED(manifestInterface->get_RootConnectionId(&rootConnectionId))) { return false; }
+
+        wrl_wrappers::HString scopeRevision;
+        if (FAILED(manifestInterface->get_ScopeRevision(scopeRevision.GetAddressOf()))) { return false; }
+
+        wrl_wrappers::HString expectedBaseTreeRevision;
+        if (FAILED(manifestInterface->get_ExpectedBaseTreeRevision(expectedBaseTreeRevision.GetAddressOf()))) { return false; }
+
+        UINT32 requiredCount = 0;
+        INT32* requiredIds = nullptr;
+        if (FAILED(manifestInterface->GetRequiredConnectionIds(&requiredCount, &requiredIds))) { return false; }
+        auto freeRequired = wil::scope_exit([&requiredIds] { CoTaskMemFree(requiredIds); });
+
+        manifest->RootConnectionId = rootConnectionId;
+        manifest->ScopeRevision = ToWString(scopeRevision.Get());
+        manifest->ExpectedBaseTreeRevision = ToWString(expectedBaseTreeRevision.Get());
+        manifest->RequiredConnectionIds.assign(requiredIds, requiredIds + requiredCount);
+        return true;
+    }
+
+    BindScope::ScopeObject GetBindingConnector(BindScope::ScopeObject connector, INT32 rootConnectionId, BindScope::ScopeObject root) override
+    {
+        auto* connectorInterface = static_cast<xaml_markup::IComponentConnector*>(
+            ResolveConnector(static_cast<IInspectable*>(connector)));
+        if (!connectorInterface)
+        {
+            return nullptr;
+        }
+
+        ctl::ComPtr<xaml_markup::IComponentConnector> scope;
+        if (FAILED(connectorInterface->GetBindingConnector(rootConnectionId, static_cast<IInspectable*>(root), &scope)) || !scope)
+        {
+            return nullptr;
+        }
+
+        // The engine takes a reference through AddRefScope when it publishes ownership, so hold the
+        // produced scope alive for the duration of this attach.
+        m_pendingScope = scope;
+        return static_cast<BindScope::ScopeObject>(scope.Get());
+    }
+
+    bool SupportsLifecycle(BindScope::ScopeObject scope) override
+    {
+        if (!scope)
+        {
+            return false;
+        }
+        ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
+        return SUCCEEDED(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(scope)).As(&lifecycle)) && lifecycle;
+    }
+
+    bool Connect(BindScope::ScopeObject scope, INT32 connectionId, BindScope::ScopeObject target) override
+    {
+        ctl::ComPtr<xaml_markup::IComponentConnector> connector;
+        if (FAILED(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(scope)).As(&connector)) || !connector)
+        {
+            return false;
+        }
+        return SUCCEEDED(connector->Connect(connectionId, static_cast<IInspectable*>(target)));
+    }
+
+    bool InitializeScope(BindScope::ScopeObject scope) override
+    {
+        ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
+        if (FAILED(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(scope)).As(&lifecycle)) || !lifecycle)
+        {
+            return false;
+        }
+        return SUCCEEDED(lifecycle->InitializeScope());
+    }
+
+    bool DetachScope(BindScope::ScopeObject scope) override
+    {
+        ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
+        if (FAILED(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(scope)).As(&lifecycle)) || !lifecycle)
+        {
+            return false;
+        }
+        return SUCCEEDED(lifecycle->DetachScope());
+    }
+
+    void AddRefScope(BindScope::ScopeObject scope) override
+    {
+        if (scope) { static_cast<IInspectable*>(scope)->AddRef(); }
+    }
+
+    void ReleaseScope(BindScope::ScopeObject scope) override
+    {
+        if (scope) { static_cast<IInspectable*>(scope)->Release(); }
+    }
+
+    void ClearPendingScope() { m_pendingScope.Reset(); }
+
+    // Base tree revision is stamped by whoever produced the tree. The versioned XBF loader is
+    // expected to own writing it; until then a tool can set it explicitly. Kept next to the host so
+    // the pure component stays free of any notion of where a revision comes from.
+    static std::unordered_map<CDependencyObject*, std::wstring>& BaseTreeRevisions()
+    {
+        static thread_local std::unordered_map<CDependencyObject*, std::wstring> revisions;
+        return revisions;
+    }
+
+private:
+    static IInspectable* ResolveConnector(_In_ IInspectable* connector)
+    {
+        return connector;
+    }
+
+    ctl::ComPtr<xaml_markup::IComponentConnector> m_pendingScope;
+};
+
+RuntimeScopeHost& Host()
+{
+    static thread_local RuntimeScopeHost host;
+    return host;
 }
 
-std::unordered_map<CDependencyObject*, xstring_ptr>& XamlBindScopeAttach::BaseTreeRevisions()
+BindScope::ScopeAttachEngine& Engine()
 {
-    static thread_local std::unordered_map<CDependencyObject*, xstring_ptr> revisions;
-    return revisions;
+    static thread_local BindScope::ScopeAttachEngine engine(Host());
+    return engine;
 }
 
-UINT64 XamlBindScopeAttach::NextInstanceId()
+// -------------------------------------------------------------------------------------------
+// Result marshalling. The component's result is plain C++; the ABI result is the projected struct.
+// -------------------------------------------------------------------------------------------
+
+_Check_return_ HRESULT ToAbiResult(const BindScope::AttachResult& source, _Out_ XamlBindScopeAttach::Result* result)
 {
-    static thread_local UINT64 next = 0;
-    return ++next;
+    ZeroMemory(result, sizeof(*result));
+
+    result->Status = static_cast<ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachStatus>(source.Status);
+    result->FailureDetail = static_cast<ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeFailureDetail>(source.Detail);
+    result->OwnedScopeInstanceId = source.OwnedScopeInstanceId;
+    result->TargetsConnected = source.TargetsConnected;
+    result->TargetsDetached = source.TargetsDetached;
+    result->FailedConnectionId = source.FailedConnectionId;
+
+    IFC_RETURN(ToHString(source.ObservedBaseTreeRevision, &result->ObservedBaseTreeRevision));
+    IFC_RETURN(ToHString(source.RequestedScopeRevision, &result->RequestedScopeRevision));
+    IFC_RETURN(ToHString(source.AppliedScopeRevision, &result->AppliedScopeRevision));
+    return S_OK;
 }
 
-void XamlBindScopeAttach::OnRootDestroyed(_In_ CDependencyObject* root)
-{
-    Records().erase(root);
-    BaseTreeRevisions().erase(root);
-}
+} // namespace
 
 _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     _In_ xaml::IDependencyObject* root,
@@ -105,317 +325,38 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     bool allowReplace,
     _Out_ Result* result)
 {
-    ZeroMemory(result, sizeof(*result));
-    result->FailedConnectionId = -1;
-
     IFCPTR_RETURN(root);
     IFCPTR_RETURN(connector);
 
-    CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
-    IFCEXPECT_RETURN(rootHandle);
+    std::vector<BindScope::TargetRow> rows;
 
-    DXamlCore* core = DXamlCore::GetCurrent();
-    IFCEXPECT_RETURN(core);
-
-    // (0) The generated side declares its own facts. A tool never restates them, so it cannot get
-    //     them wrong, and the runtime has an authoritative statement of what the scope needs.
-    ctl::ComPtr<xaml_markup::IXamlBindScopeManifest> manifest;
-    if (FAILED(ctl::ComPtr<xaml_markup::IComponentConnector>(connector).As(&manifest)) || !manifest)
+    // Array shape is validated by the component, but the arrays have to agree before they can be
+    // zipped into rows at all.
+    if (idCount != 0 && nameCount == idCount && typeCount == idCount && objectCount == idCount)
     {
-        Refuse(result, Detail::XamlBindScopeFailureDetail_ScopeManifestUnavailable);
-        return S_OK;
-    }
-
-    INT32 rootConnectionId = -1;
-    IFC_RETURN(manifest->get_RootConnectionId(&rootConnectionId));
-
-    wrl_wrappers::HString scopeRevision;
-    IFC_RETURN(manifest->get_ScopeRevision(scopeRevision.GetAddressOf()));
-
-    wrl_wrappers::HString expectedBaseTreeRevision;
-    IFC_RETURN(manifest->get_ExpectedBaseTreeRevision(expectedBaseTreeRevision.GetAddressOf()));
-
-    IFC_RETURN(WindowsDuplicateString(scopeRevision.Get(), &result->RequestedScopeRevision));
-
-    auto& records = Records();
-    auto existing = records.find(rootHandle);
-    if (existing != records.end())
-    {
-        result->OwnedScopeInstanceId = existing->second.InstanceId;
-        IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, &result->AppliedScopeRevision));
-    }
-
-    // ---------------------------------------------------------------------------------------
-    // Preflight. Nothing below this block mutates anything until the section marked MUTATION.
-    // Fault precedence is fixed: base tree first, then scope state, then manifest shape, then rows.
-    // ---------------------------------------------------------------------------------------
-
-    // (1) Base tree revision. Dominates every other fault, and fails closed: a scope that asserts
-    //     nothing, or a root that carries nothing, is refused rather than attached blindly. When the
-    //     base tree disagrees the connection ids in the manifest describe a different object graph,
-    //     so no row can be trusted and no target may be connected.
-    {
-        auto revision = BaseTreeRevisions().find(rootHandle);
-        if (revision != BaseTreeRevisions().end())
+        rows.reserve(idCount);
+        for (UINT32 i = 0; i < idCount; ++i)
         {
-            IFC_RETURN(PromoteToHString(revision->second, &result->ObservedBaseTreeRevision));
-        }
-
-        if (IsEmpty(expectedBaseTreeRevision.Get()) || IsEmpty(result->ObservedBaseTreeRevision))
-        {
-            Refuse(result, Detail::XamlBindScopeFailureDetail_BaseTreeRevisionUnavailable);
-            return S_OK;
-        }
-        if (!StringsEqual(expectedBaseTreeRevision.Get(), result->ObservedBaseTreeRevision))
-        {
-            Refuse(result, Detail::XamlBindScopeFailureDetail_BaseTreeRevisionMismatch);
-            return S_OK;
+            BindScope::TargetRow row;
+            row.ConnectionId = ids[i];
+            row.StableName = ToWString(stableNames[i]);
+            row.ExpectedTypeName = ToWString(typeNames[i]);
+            row.Target = static_cast<BindScope::ScopeObject>(objects[i]);
+            rows.push_back(std::move(row));
         }
     }
 
-    // (2) Scope state. Only reachable once the base tree agrees.
-    if (existing != records.end())
-    {
-        if (StringsEqual(scopeRevision.Get(), result->AppliedScopeRevision))
-        {
-            // Same scope already live. Never connect a second time: that is how duplicate writers
-            // and duplicate listener registrations are created.
-            result->Status = Status::XamlBindScopeAttachStatus_AlreadyAttached;
-            result->FailureDetail = Detail::XamlBindScopeFailureDetail_ScopeRevisionAlreadyApplied;
-            result->TargetsConnected = 0;
-            return S_OK;
-        }
-        if (!allowReplace)
-        {
-            Refuse(result, Detail::XamlBindScopeFailureDetail_ScopeRevisionConflict);
-            return S_OK;
-        }
-    }
-
-    // (3) Manifest shape.
-    if (idCount == 0 || nameCount != idCount || typeCount != idCount || objectCount != idCount)
-    {
-        Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestShapeInvalid);
-        return S_OK;
-    }
-
-    for (UINT32 i = 0; i < idCount; ++i)
-    {
-        if (ids[i] < 0)
-        {
-            Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestDuplicateConnectionId, ids[i]);
-            return S_OK;
-        }
-        for (UINT32 j = i + 1; j < idCount; ++j)
-        {
-            if (ids[i] == ids[j])
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestDuplicateConnectionId, ids[i]);
-                return S_OK;
-            }
-        }
-    }
-
-    // (3b) Completeness. Every id the scope declared it will populate must have a row. Without this
-    //      an omitted row produces a scope that is connected, reports success and is silently inert
-    //      for that target, which is precisely the failure mode this contract exists to prevent.
-    {
-        UINT32 requiredCount = 0;
-        INT32* requiredIds = nullptr;
-        IFC_RETURN(manifest->GetRequiredConnectionIds(&requiredCount, &requiredIds));
-        auto freeRequired = wil::scope_exit([&requiredIds] { CoTaskMemFree(requiredIds); });
-
-        for (UINT32 r = 0; r < requiredCount; ++r)
-        {
-            bool found = false;
-            for (UINT32 i = 0; i < idCount && !found; ++i)
-            {
-                found = (ids[i] == requiredIds[r]);
-            }
-            if (!found)
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestIncomplete, requiredIds[r]);
-                return S_OK;
-            }
-        }
-    }
-
-    // (4) Row identity. The runtime resolves every named row itself, out of the root's namescope,
-    //     and requires the caller's object to be that same instance. This is what catches two
-    //     adjacent same-typed elements being swapped in the manifest: both casts would succeed, but
-    //     only one instance is the one FindName returns for that name.
-    std::vector<ResolvedRow> rows;
-    rows.reserve(idCount);
-
-    for (UINT32 i = 0; i < idCount; ++i)
-    {
-        ResolvedRow row;
-        row.ConnectionId = ids[i];
-        bool resolvedFromNamescope = false;
-
-        if (!IsEmpty(stableNames[i]))
-        {
-            auto named = core->GetHandle()->TryGetElementByName(xephemeral_string_ptr(stableNames[i]), rootHandle);
-            if (!named)
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_TargetNotResolvable, row.ConnectionId);
-                return S_OK;
-            }
-
-            ctl::ComPtr<DependencyObject> peer;
-            IFC_RETURN(core->GetPeer(named.get(), &peer));
-            row.Target = ctl::as_iinspectable(peer.Get());
-
-            if (objects[i] && !IsSameInstance(row.Target.Get(), objects[i]))
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_TargetIdentityMismatch, row.ConnectionId);
-                return S_OK;
-            }
-
-            // Resolution came out of this root's namescope, so membership is already proven and the
-            // owner check below would be redundant.
-            resolvedFromNamescope = true;
-        }
-        else
-        {
-            if (!objects[i])
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_TargetNotResolvable, row.ConnectionId);
-                return S_OK;
-            }
-            row.Target = objects[i];
-        }
-
-        // Reachability, for unnamed rows only. An unnamed row carries no independent identity, so
-        // require the object to belong to this root's namescope; without it an object from another
-        // live instance of the same page would be accepted.
-        //
-        // GetStandardNameScopeOwner walks the namescope owner chain, which exists from parse time.
-        // That matters: an app-level equivalent built on the visual tree cannot validate a root that
-        // has been constructed but never realized, which is exactly the cached-instance case this
-        // feature has to support.
-        ctl::ComPtr<xaml::IDependencyObject> targetAsDO;
-        if (!resolvedFromNamescope && SUCCEEDED(row.Target.As(&targetAsDO)) && targetAsDO)
-        {
-            CDependencyObject* targetHandle = static_cast<DependencyObject*>(targetAsDO.Get())->GetHandle();
-            if (targetHandle != rootHandle && targetHandle->GetStandardNameScopeOwner() != rootHandle)
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_TargetOutsideNamescope, row.ConnectionId);
-                return S_OK;
-            }
-        }
-
-        // Secondary guard only, and only after identity has been established.
-        if (!IsEmpty(typeNames[i]))
-        {
-            wrl_wrappers::HString actualTypeName;
-            IFC_RETURN(row.Target->GetRuntimeClassName(actualTypeName.GetAddressOf()));
-            if (!StringsEqual(actualTypeName.Get(), typeNames[i]))
-            {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_TargetTypeMismatch, row.ConnectionId);
-                return S_OK;
-            }
-        }
-
-        rows.push_back(std::move(row));
-    }
-
-    // (5) The root row must exist and must be the root itself. A cold parse always calls
-    //     Connect(rootConnectionId, root) on the scope it just created.
-    {
-        ctl::ComPtr<IInspectable> rootAsInspectable = ctl::as_iinspectable(static_cast<DependencyObject*>(root));
-        auto rootRow = std::find_if(rows.begin(), rows.end(), [&](const ResolvedRow& r)
-        {
-            return r.ConnectionId == rootConnectionId;
-        });
-        if (rootRow == rows.end() || !IsSameInstance(rootRow->Target.Get(), rootAsInspectable.Get()))
-        {
-            Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestMissingRootRow, rootConnectionId);
-            return S_OK;
-        }
-    }
-
-    // Replay parse order.
-    std::sort(rows.begin(), rows.end(), [](const ResolvedRow& a, const ResolvedRow& b)
-    {
-        return a.ConnectionId < b.ConnectionId;
-    });
-
-    // ---------------------------------------------------------------------------------------
-    // MUTATION.
-    // ---------------------------------------------------------------------------------------
-
-    // Producing the scope is ordered before detaching the outgoing one so that a connector that
-    // cannot produce a scope is a clean refusal rather than a tree that lost its bindings.
     ctl::ComPtr<IInspectable> rootAsInspectable = ctl::as_iinspectable(static_cast<DependencyObject*>(root));
-    ctl::ComPtr<xaml_markup::IComponentConnector> scope;
-    IFC_RETURN(connector->GetBindingConnector(rootConnectionId, rootAsInspectable.Get(), &scope));
-    if (!scope)
-    {
-        Refuse(result, Detail::XamlBindScopeFailureDetail_ScopeNotProduced, rootConnectionId);
-        return S_OK;
-    }
 
-    // A scope that cannot be initialized or stopped would be attached inert and could never be
-    // replaced without leaking a writer. Refuse rather than report success for a no-op.
-    ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
-    if (FAILED(scope.As(&lifecycle)) || !lifecycle)
-    {
-        Refuse(result, Detail::XamlBindScopeFailureDetail_ScopeLifecycleUnsupported, rootConnectionId);
-        return S_OK;
-    }
+    BindScope::AttachResult attachResult = Engine().Attach(
+        static_cast<BindScope::ScopeObject>(rootAsInspectable.Get()),
+        static_cast<BindScope::ScopeObject>(connector),
+        rows,
+        allowReplace);
 
-    const bool replacing = existing != records.end();
-    if (replacing)
-    {
-        ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> outgoing;
-        if (SUCCEEDED(existing->second.Scope.As(&outgoing)) && outgoing)
-        {
-            IFC_RETURN(outgoing->DetachScope());
-        }
-        result->TargetsDetached = existing->second.TargetCount;
-        records.erase(existing);
-    }
+    Host().ClearPendingScope();
 
-    XamlBindScopeRecord record;
-    record.Scope = scope;
-    record.InstanceId = NextInstanceId();
-    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(scopeRevision.Get(), &record.ScopeRevision));
-    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(expectedBaseTreeRevision.Get(), &record.BaseTreeRevision));
-
-    for (const auto& row : rows)
-    {
-        HRESULT connectHr = scope->Connect(row.ConnectionId, row.Target.Get());
-        if (FAILED(connectHr))
-        {
-            // Partially populated. There is no sound rollback: some targets already carry values
-            // written by the new scope. Record the record as desynchronized so a later attach is
-            // refused, and tell the caller exactly where it stopped.
-            record.Desynchronized = true;
-            record.TargetCount = result->TargetsConnected;
-            records[rootHandle] = std::move(record);
-
-            result->Status = Status::XamlBindScopeAttachStatus_Desynchronized;
-            result->FailureDetail = Detail::XamlBindScopeFailureDetail_DesyncScopeState;
-            result->FailedConnectionId = row.ConnectionId;
-            return S_OK;
-        }
-        ++result->TargetsConnected;
-    }
-
-    // The Loading subscription a cold parse relies on has already fired for a live root, so the
-    // first update has to be driven explicitly. Idempotent by contract.
-    IFC_RETURN(lifecycle->InitializeScope());
-
-    record.TargetCount = result->TargetsConnected;
-    result->OwnedScopeInstanceId = record.InstanceId;
-    IFC_RETURN(WindowsDuplicateString(scopeRevision.Get(), &result->AppliedScopeRevision));
-    records[rootHandle] = std::move(record);
-
-    result->Status = replacing
-        ? Status::XamlBindScopeAttachStatus_Replaced
-        : Status::XamlBindScopeAttachStatus_Attached;
-    result->FailureDetail = Detail::XamlBindScopeFailureDetail_None;
+    IFC_RETURN(ToAbiResult(attachResult, result));
     return S_OK;
 }
 
@@ -423,41 +364,12 @@ _Check_return_ HRESULT XamlBindScopeAttach::Detach(
     _In_ xaml::IDependencyObject* root,
     _Out_ Result* result)
 {
-    ZeroMemory(result, sizeof(*result));
-    result->FailedConnectionId = -1;
     IFCPTR_RETURN(root);
 
-    CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
-    IFCEXPECT_RETURN(rootHandle);
+    ctl::ComPtr<IInspectable> rootAsInspectable = ctl::as_iinspectable(static_cast<DependencyObject*>(root));
+    BindScope::AttachResult detachResult = Engine().Detach(static_cast<BindScope::ScopeObject>(rootAsInspectable.Get()));
 
-    auto revision = BaseTreeRevisions().find(rootHandle);
-    if (revision != BaseTreeRevisions().end())
-    {
-        IFC_RETURN(PromoteToHString(revision->second, &result->ObservedBaseTreeRevision));
-    }
-
-    auto& records = Records();
-    auto existing = records.find(rootHandle);
-    if (existing == records.end())
-    {
-        Refuse(result, Detail::XamlBindScopeFailureDetail_NothingAttached);
-        return S_OK;
-    }
-
-    IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, &result->AppliedScopeRevision));
-    result->TargetsDetached = existing->second.TargetCount;
-
-    ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
-    if (SUCCEEDED(existing->second.Scope.As(&lifecycle)) && lifecycle)
-    {
-        IFC_RETURN(lifecycle->DetachScope());
-    }
-
-    records.erase(existing);
-
-    result->Status = Status::XamlBindScopeAttachStatus_Detached;
-    result->FailureDetail = Detail::XamlBindScopeFailureDetail_None;
-    result->OwnedScopeInstanceId = 0;
+    IFC_RETURN(ToAbiResult(detachResult, result));
     return S_OK;
 }
 
@@ -468,15 +380,16 @@ _Check_return_ HRESULT XamlBindScopeAttach::GetAttachedScope(
     *scope = nullptr;
     IFCPTR_RETURN(root);
 
-    CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
-    IFCEXPECT_RETURN(rootHandle);
-
-    auto& records = Records();
-    auto existing = records.find(rootHandle);
-    if (existing != records.end())
+    ctl::ComPtr<IInspectable> rootAsInspectable = ctl::as_iinspectable(static_cast<DependencyObject*>(root));
+    BindScope::ScopeObject owned = Engine().GetOwnedScope(static_cast<BindScope::ScopeObject>(rootAsInspectable.Get()));
+    if (!owned)
     {
-        IFC_RETURN(existing->second.Scope.CopyTo(scope));
+        return S_OK;
     }
+
+    ctl::ComPtr<xaml_markup::IComponentConnector> connector;
+    IFC_RETURN(ctl::ComPtr<IInspectable>(static_cast<IInspectable*>(owned)).As(&connector));
+    IFC_RETURN(connector.CopyTo(scope));
     return S_OK;
 }
 
@@ -485,15 +398,8 @@ _Check_return_ HRESULT XamlBindScopeAttach::GetAttachedScopeRevision(_In_ xaml::
     *revision = nullptr;
     IFCPTR_RETURN(root);
 
-    CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
-    IFCEXPECT_RETURN(rootHandle);
-
-    auto& records = Records();
-    auto existing = records.find(rootHandle);
-    if (existing != records.end())
-    {
-        IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, revision));
-    }
+    ctl::ComPtr<IInspectable> rootAsInspectable = ctl::as_iinspectable(static_cast<DependencyObject*>(root));
+    IFC_RETURN(ToHString(Engine().GetOwnedScopeRevision(static_cast<BindScope::ScopeObject>(rootAsInspectable.Get())), revision));
     return S_OK;
 }
 
@@ -505,11 +411,11 @@ _Check_return_ HRESULT XamlBindScopeAttach::GetBaseTreeRevision(_In_ xaml::IDepe
     CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
     IFCEXPECT_RETURN(rootHandle);
 
-    auto& revisions = BaseTreeRevisions();
-    auto existing = revisions.find(rootHandle);
-    if (existing != revisions.end())
+    auto& revisions = RuntimeScopeHost::BaseTreeRevisions();
+    auto found = revisions.find(rootHandle);
+    if (found != revisions.end())
     {
-        IFC_RETURN(PromoteToHString(existing->second, revision));
+        IFC_RETURN(ToHString(found->second, revision));
     }
     return S_OK;
 }
@@ -521,14 +427,26 @@ _Check_return_ HRESULT XamlBindScopeAttach::SetBaseTreeRevision(_In_ xaml::IDepe
     CDependencyObject* rootHandle = static_cast<DependencyObject*>(root)->GetHandle();
     IFCEXPECT_RETURN(rootHandle);
 
-    if (IsEmpty(revision))
+    auto& revisions = RuntimeScopeHost::BaseTreeRevisions();
+    const std::wstring value = ToWString(revision);
+    if (value.empty())
     {
-        BaseTreeRevisions().erase(rootHandle);
-        return S_OK;
+        revisions.erase(rootHandle);
     }
-
-    xstring_ptr stored;
-    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(revision, &stored));
-    BaseTreeRevisions()[rootHandle] = std::move(stored);
+    else
+    {
+        revisions[rootHandle] = value;
+    }
     return S_OK;
+}
+
+void XamlBindScopeAttach::OnRootDestroyed(_In_ CDependencyObject* root)
+{
+    RuntimeScopeHost::BaseTreeRevisions().erase(root);
+
+    ctl::ComPtr<IInspectable> peer;
+    if (SUCCEEDED(DXamlServices::TryGetPeer(root, IID_PPV_ARGS(&peer))) && peer)
+    {
+        Engine().OnRootDestroyed(static_cast<BindScope::ScopeObject>(peer.Get()));
+    }
 }
