@@ -2132,6 +2132,64 @@ namespace Microsoft.UI.Xaml.Markup
         void Disable(Int32 lineNumber, Int32 columnNumber);
     };
 
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    interface IXamlBindScopeLifecycle
+    {
+        void InitializeScope();
+        void DetachScope();
+    };
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    enum XamlBindScopeAttachStatus
+    {
+        Attached = 0,
+        Replaced = 1,
+        Detached = 2,
+        AlreadyAttached = 3,
+        Refused = 4,
+        Desynchronized = 5,
+    };
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    enum XamlBindScopeFailureDetail
+    {
+        None = 0,
+        BaseTreeRevisionUnavailable = 1,
+        BaseTreeRevisionMismatch = 2,
+        ScopeRevisionAlreadyApplied = 3,
+        ScopeRevisionConflict = 4,
+        ScopeNotProduced = 5,
+        ManifestShapeInvalid = 6,
+        ManifestDuplicateConnectionId = 7,
+        ManifestMissingRootRow = 8,
+        TargetNotResolvable = 9,
+        TargetIdentityMismatch = 10,
+        TargetTypeMismatch = 11,
+        TargetOutsideNamescope = 12,
+        NothingAttached = 13,
+        DesyncScopeState = 14,
+        DesyncBaseTree = 15,
+        ScopeLifecycleUnsupported = 16,
+    };
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    struct XamlBindScopeAttachResult
+    {
+        Microsoft.UI.Xaml.Markup.XamlBindScopeAttachStatus Status;
+        Microsoft.UI.Xaml.Markup.XamlBindScopeFailureDetail FailureDetail;
+        String ObservedBaseTreeRevision;
+        String RequestedScopeRevision;
+        String AppliedScopeRevision;
+        UInt64 OwnedScopeInstanceId;
+        Int32 TargetsConnected;
+        Int32 TargetsDetached;
+        Int32 FailedConnectionId;
+    };
+
     [contract(Microsoft.UI.Xaml.WinUIContract, 10)]
     [webhosthidden]
     interface IXamlCondition 
@@ -2256,6 +2314,37 @@ namespace Microsoft.UI.Xaml.Markup
             static void SetPropertyFromThickness(Object dependencyObject, Microsoft.UI.Xaml.DependencyProperty propertyToSet, Microsoft.UI.Xaml.Thickness value);
             static void SetPropertyFromCornerRadius(Object dependencyObject, Microsoft.UI.Xaml.DependencyProperty propertyToSet, Microsoft.UI.Xaml.CornerRadius value);
             static void SetPropertyFromColor(Object dependencyObject, Microsoft.UI.Xaml.DependencyProperty propertyToSet, Windows.UI.Color value);
+        }
+
+        [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+        {
+            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult TryAttachBindingScope(
+                Microsoft.UI.Xaml.DependencyObject root,
+                Microsoft.UI.Xaml.Markup.IComponentConnector connector,
+                Int32 rootConnectionId,
+                Int32[] targetConnectionIds,
+                String[] targetStableNames,
+                String[] targetTypeNames,
+                Object[] targetObjects,
+                String expectedBaseTreeRevision,
+                String scopeRevision);
+
+            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult ReplaceBindingScope(
+                Microsoft.UI.Xaml.DependencyObject root,
+                Microsoft.UI.Xaml.Markup.IComponentConnector connector,
+                Int32 rootConnectionId,
+                Int32[] targetConnectionIds,
+                String[] targetStableNames,
+                String[] targetTypeNames,
+                Object[] targetObjects,
+                String expectedBaseTreeRevision,
+                String scopeRevision);
+
+            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult DetachBindingScope(Microsoft.UI.Xaml.DependencyObject root);
+            static Microsoft.UI.Xaml.Markup.IComponentConnector GetAttachedBindingScope(Microsoft.UI.Xaml.DependencyObject root);
+            static String GetAttachedScopeRevision(Microsoft.UI.Xaml.DependencyObject root);
+            static String GetBaseTreeRevision(Microsoft.UI.Xaml.DependencyObject root);
+            static void SetBaseTreeRevision(Microsoft.UI.Xaml.DependencyObject root, String baseTreeRevision);
         }
     };
 

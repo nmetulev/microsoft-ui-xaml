@@ -136,6 +136,34 @@ namespace Microsoft.UI.Xaml.Markup
         void Disable(int lineNumber, int columnNumber);
     }
 
+    // Optional interface a compiled-binding scope implements so the runtime can drive the two
+    // lifecycle moments that a cold parse gets for free.
+    //
+    // In a cold parse the generated scope subscribes to FrameworkElement.Loading inside
+    // GetBindingConnector, and that Loading callback performs the first Update. A root that is
+    // already live has already raised Loading, so nothing would ever run the first Update, and
+    // Connect alone would leave the scope populated but inert. Likewise IComponentConnector has no
+    // way to tell a scope it is being replaced, so an outgoing scope would keep its
+    // PropertyChanged/DataContextChanged/collection listeners and keep writing its targets.
+    //
+    // The runtime refuses a live attach when the produced scope does not implement this interface,
+    // rather than reporting success for an operation that could have no effect.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [CodeGen(CodeGenLevel.LookupOnly)]
+    [TypeTable(IsExcludedFromNewTypeTable = true)]
+    public interface IXamlBindScopeLifecycle
+    {
+        // Called once, after every manifest row has been connected, in place of the Loading
+        // callback a cold parse would have used. Must be idempotent.
+        void InitializeScope();
+
+        // Called on the outgoing scope before a replace, and on the owned scope on detach. Must
+        // release every listener the scope registered (property changed, data context changed,
+        // collection changed, loading) so the scope stops writing its targets.
+        void DetachScope();
+    }
+
     [DXamlIdlGroup("coretypes2")]
     [HideFromOldCodeGen]
     [TypeTable(IsExcludedFromNewTypeTable = true)]
@@ -166,8 +194,155 @@ namespace Microsoft.UI.Xaml.Markup
         }
     }
 
+    // Coarse outcome of a live compiled-binding ({x:Bind}) scope attach, replace or detach performed
+    // on an already-constructed object tree. Callers branch on this; XamlBindScopeFailureDetail says
+    // why. Only Attached/Replaced/Detached mutate the tree. Desynchronized means a mutation started
+    // and could not be rolled back.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [TypeTable(IsExcludedFromCore = true, IsExcludedFromNewTypeTable = true)]
+    [EnumFlags(IsExcludedFromNative = true)]
+    public enum XamlBindScopeAttachStatus
+    {
+        // A new scope was created and every manifest row was connected.
+        Attached = 0,
+        // A previously attached scope was detached and a new one was attached in its place.
+        Replaced = 1,
+        // A previously attached scope was detached and no new scope was attached.
+        Detached = 2,
+        // The root already owns a scope with the same scope revision. Nothing changed.
+        AlreadyAttached = 3,
+        // Preflight rejected the request. Nothing changed. See FailureDetail.
+        Refused = 4,
+        // Mutation began and could not be completed or rolled back. The caller must rebuild the
+        // root. FailureDetail names which dimension desynchronized.
+        Desynchronized = 5,
+    }
+
+    // Precise reason accompanying a XamlBindScopeAttachStatus. Deliberately fine grained so a tool
+    // can tell a stale base tree from a stale scope from a bad manifest row.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [TypeTable(IsExcludedFromCore = true, IsExcludedFromNewTypeTable = true)]
+    [EnumFlags(IsExcludedFromNative = true)]
+    public enum XamlBindScopeFailureDetail
+    {
+        None = 0,
+
+        // --- base tree dimension: identity of the XBF/object graph that built the live root ---
+        // The caller supplied an expected base tree revision but the root carries none, so the
+        // precondition could not be evaluated. Never treated as success.
+        BaseTreeRevisionUnavailable = 1,
+        // The root was built from a different base tree revision than the manifest was authored
+        // against. Connection ids in the manifest cannot be trusted.
+        BaseTreeRevisionMismatch = 2,
+
+        // --- scope dimension: identity of the newly generated binding scope + binding manifest ---
+        // The root already owns a scope carrying this exact scope revision; attaching again would
+        // duplicate writers.
+        ScopeRevisionAlreadyApplied = 3,
+        // The root owns a scope from a different revision; the caller must use ReplaceBindingScope.
+        ScopeRevisionConflict = 4,
+        // The connector returned no scope for the supplied root connection id.
+        ScopeNotProduced = 5,
+
+        // --- manifest shape ---
+        // Parallel manifest arrays have mismatched lengths, or the manifest is empty.
+        ManifestShapeInvalid = 6,
+        // A connection id appears twice, or is negative.
+        ManifestDuplicateConnectionId = 7,
+        // The manifest has no row whose connection id equals the supplied root connection id, or
+        // that row's target is not the root.
+        ManifestMissingRootRow = 8,
+
+        // --- per-row target identity ---
+        // A row named an element that does not resolve inside the root's namescope, and supplied
+        // no object either.
+        TargetNotResolvable = 9,
+        // A row supplied both a stable name and an object and they are not the same instance.
+        // This is the check that catches two adjacent same-typed elements being swapped; a
+        // successful QueryInterface/cast is explicitly not accepted as evidence of identity.
+        TargetIdentityMismatch = 10,
+        // The resolved target's runtime class name does not equal the row's expected type name.
+        // Secondary guard only; identity is checked first.
+        TargetTypeMismatch = 11,
+        // The resolved target is not reachable from the root's namescope, so it does not belong to
+        // this document instance.
+        TargetOutsideNamescope = 12,
+
+        // --- detach ---
+        // Detach was requested but the root owns no scope.
+        NothingAttached = 13,
+
+        // --- desynchronization ---
+        // Connect failed part way through populating the new scope. Scope state is indeterminate.
+        DesyncScopeState = 14,
+        // The base tree changed underneath the operation while it was running.
+        DesyncBaseTree = 15,
+
+        // The scope the connector produced does not implement IXamlBindScopeLifecycle, so the
+        // runtime cannot run the initial update or later stop the scope. Attaching it would produce
+        // an inert scope and an unstoppable writer, so the request is refused instead.
+        ScopeLifecycleUnsupported = 16,
+    }
+
+    // Truthful result of an attach/replace/detach request. The runtime never reports plain success
+    // for a call that had no effect, and always echoes both revision dimensions so a tool can tell
+    // which one is stale without interpreting a single opaque token.
+    //
+    // Fault precedence, deliberately fixed: a base tree fault dominates every other fault. If the
+    // live root was built from a different base tree than the manifest was authored against, the
+    // connection ids in the manifest are meaningless, so the runtime refuses before it looks at the
+    // scope revision, the manifest shape or any row. Zero targets are connected and Attached is
+    // never returned. The remedy for a base tree fault is to re-inflate the root; the remedy for a
+    // scope fault is ReplaceBindingScope.
+    //
+    // The check is fail closed. A caller that supplies no expected base tree revision, or a root
+    // that carries none, is refused with BaseTreeRevisionUnavailable rather than attached blindly.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [HideFromOldCodeGen]
+    [TypeTable(IsExcludedFromNewTypeTable = true)]
+    public struct XamlBindScopeAttachResult
+    {
+        public XamlBindScopeAttachStatus Status { get; set; }
+        public XamlBindScopeFailureDetail FailureDetail { get; set; }
+        // Base tree revision the runtime actually observed on the root. Empty when the root carries
+        // none, which is itself a refusal. Opaque to the runtime: the producer chooses the content,
+        // expected to be XBF content hash combined with source checksum, compiler/schema version and
+        // connection-map hash. Without the connection-map hash the check is only partial, and that
+        // is a property of the producer, not of this contract.
+        public string ObservedBaseTreeRevision { get; set; }
+        // Scope revision the caller asked for, echoed back so a caller can correlate results.
+        public string RequestedScopeRevision { get; set; }
+        // Scope revision now recorded against the root. On AlreadyAttached and on a scope conflict
+        // this is the revision that was already live, which is what distinguishes "mine is stale"
+        // from "mine is already applied".
+        public string AppliedScopeRevision { get; set; }
+        // Runtime-assigned identity of the ownership record currently held for the root, or 0 when
+        // the root owns no scope. Monotonic per process. A repeat attach that is correctly refused
+        // leaves this unchanged, which is independently checkable without trusting the status.
+        public ulong OwnedScopeInstanceId { get; set; }
+        // Rows handed to IComponentConnector::Connect on the new scope. Always 0 on any refusal.
+        public int TargetsConnected { get; set; }
+        // Rows the previous scope owned, when one was detached.
+        public int TargetsDetached { get; set; }
+        // Connection id that caused the refusal or desync, or -1 when not applicable.
+        public int FailedConnectionId { get; set; }
+    }
+
     [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), 1, ForcePrimaryInterfaceGeneration = true)]
     [Platform(2, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_2_2)]
+    [Platform(3, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [PartialFactory]
+    [DXamlIdlGroup("coretypes2")]
+    [Guids(ClassGuid = "5907bcb4-ff97-47ad-8049-fa5b5da86032")]
+    public static class XamlBindingHelper
+    {
+
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), 1, ForcePrimaryInterfaceGeneration = true)]
+    [Platform(2, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_2_2)]
+    [Platform(3, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
     [PartialFactory]
     [DXamlIdlGroup("coretypes2")]
     [Guids(ClassGuid = "5907bcb4-ff97-47ad-8049-fa5b5da86032")]
@@ -297,6 +472,119 @@ namespace Microsoft.UI.Xaml.Markup
         [Version(2)]
         [CodeGen(CodeGenLevel.IdlAndPartialStub)]
         public static void SetPropertyFromColor(Windows.Foundation.Object dependencyObject, DependencyProperty propertyToSet, Windows.UI.Color value)
+        {
+        }
+
+        // ---------------------------------------------------------------------------------------
+        // Live compiled-binding scope attach.
+        //
+        // A compiled-binding scope is normally produced exactly once, during parse, by
+        // IComponentConnector::GetBindingConnector on the root connection id, and is then populated
+        // by IComponentConnector::Connect for every subsequent connection id. Nothing survives that
+        // parse: the runtime does not retain a connectionId -> object map, so a caller wanting to
+        // introduce a scope into an already-constructed tree must supply the target map explicitly.
+        //
+        // Two independent revision dimensions are involved and both are reported back:
+        //   baseTreeRevision  identity of the XBF/object graph that constructed the live root. The
+        //                     producer chooses the content (XBF hash + connection-map hash +
+        //                     compiler/schema version). Connection ids are only meaningful relative
+        //                     to it, so every manifest row is validated against it.
+        //   scopeRevision     identity of the newly generated binding scope and its manifest. It is
+        //                     recorded on the root so repeat attaches are idempotent or refused.
+        // The feature deliberately pairs an OLD base tree with a NEW scope, so these are never
+        // required to be equal.
+        // ---------------------------------------------------------------------------------------
+
+        // Attaches a newly generated compiled-binding scope to an already-constructed root that does
+        // not currently own one.
+        //
+        // The manifest is four parallel arrays, one row per connection id:
+        //   targetConnectionIds  the compiler-assigned connection id.
+        //   targetStableNames    scope-qualified x:Name of the element, or empty when it has none.
+        //                        When present the runtime resolves it independently and requires the
+        //                        resolved instance to be the same object as targetObjects[i].
+        //   targetTypeNames      expected runtime class name, used only as a secondary guard after
+        //                        identity has been established. A successful cast is never accepted
+        //                        as evidence that a row refers to the intended element.
+        //   targetObjects        the live object, required for rows with no stable name.
+        //
+        // All validation happens before any call to GetBindingConnector or Connect, so a refusal
+        // leaves the tree untouched.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static XamlBindScopeAttachResult TryAttachBindingScope(
+            Microsoft.UI.Xaml.DependencyObject root,
+            Microsoft.UI.Xaml.Markup.IComponentConnector connector,
+            Windows.Foundation.Int32 rootConnectionId,
+            Windows.Foundation.Int32[] targetConnectionIds,
+            Windows.Foundation.String[] targetStableNames,
+            Windows.Foundation.String[] targetTypeNames,
+            Windows.Foundation.Object[] targetObjects,
+            Windows.Foundation.String expectedBaseTreeRevision,
+            Windows.Foundation.String scopeRevision)
+        {
+            return default(XamlBindScopeAttachResult);
+        }
+
+        // Detaches whatever scope the root currently owns and attaches a new one in a single
+        // operation. Preflight is identical to TryAttachBindingScope, except that an existing scope
+        // is expected rather than refused. The previous scope stops receiving updates before the new
+        // one is created, so no interval exists in which two scopes write the same target.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static XamlBindScopeAttachResult ReplaceBindingScope(
+            Microsoft.UI.Xaml.DependencyObject root,
+            Microsoft.UI.Xaml.Markup.IComponentConnector connector,
+            Windows.Foundation.Int32 rootConnectionId,
+            Windows.Foundation.Int32[] targetConnectionIds,
+            Windows.Foundation.String[] targetStableNames,
+            Windows.Foundation.String[] targetTypeNames,
+            Windows.Foundation.Object[] targetObjects,
+            Windows.Foundation.String expectedBaseTreeRevision,
+            Windows.Foundation.String scopeRevision)
+        {
+            return default(XamlBindScopeAttachResult);
+        }
+
+        // Releases the scope the root owns, clearing runtime ownership so no writer is left behind.
+        // Returns NothingAttached when the root owns no scope; this is a refusal, not a success.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static XamlBindScopeAttachResult DetachBindingScope(Microsoft.UI.Xaml.DependencyObject root)
+        {
+            return default(XamlBindScopeAttachResult);
+        }
+
+        // Ownership observability. Returns the scope the runtime currently holds for the root, or
+        // null. Lets a tool prove that exactly one scope is owned.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static Microsoft.UI.Xaml.Markup.IComponentConnector GetAttachedBindingScope(Microsoft.UI.Xaml.DependencyObject root)
+        {
+            return default(Microsoft.UI.Xaml.Markup.IComponentConnector);
+        }
+
+        // Scope revision currently recorded against the root, or the empty string.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static Windows.Foundation.String GetAttachedScopeRevision(Microsoft.UI.Xaml.DependencyObject root)
+        {
+            return default(Windows.Foundation.String);
+        }
+
+        // Base tree revision stamped on the root when it was inflated, or the empty string. Written
+        // by whoever produced the tree; the versioned-XBF loader is expected to own this once it
+        // exists, which is the seam where the two prototypes meet.
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static Windows.Foundation.String GetBaseTreeRevision(Microsoft.UI.Xaml.DependencyObject root)
+        {
+            return default(Windows.Foundation.String);
+        }
+
+        [Version(3)]
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static void SetBaseTreeRevision(Microsoft.UI.Xaml.DependencyObject root, Windows.Foundation.String baseTreeRevision)
         {
         }
     }
