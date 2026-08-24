@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Subject. Deliberately contains no {x:Bind}, which is what an already-inflated page built from an
+     older XBF looks like: the compiler emitted no root x:ConnectionId, so the parser never called
+     GetBindingConnector and no scope exists. The element tree is otherwise identical to the oracle.
+
+     TitleText and AltText are adjacent and the same type on purpose: they are the negative control
+     for "a successful cast proves nothing about which element a manifest row means". -->
+<Page
+    x:Class="LiveBindScopeProbe.SubjectPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:LiveBindScopeProbe"
+    mc:Ignorable="d"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+
+    <StackPanel>
+        <TextBlock x:Name="TitleText" x:FieldModifier="public" />
+        <TextBlock x:Name="AltText" x:FieldModifier="public" />
+        <ListView x:Name="TodoList" x:FieldModifier="public" />
+    </StackPanel>
+</Page>

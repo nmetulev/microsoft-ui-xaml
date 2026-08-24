@@ -136,6 +136,39 @@ namespace Microsoft.UI.Xaml.Markup
         void Disable(int lineNumber, int columnNumber);
     }
 
+    // Declared by the object that produces a compiled-binding scope, so the runtime can validate a
+    // live attach without the caller retyping facts the generated code already knows.
+    //
+    // Everything here is authored by whoever generated the scope. A tool supplies only the live
+    // objects; it never restates the root connection id, the set of ids the scope needs, or either
+    // revision, which removes a whole class of caller error and lets the runtime refuse an
+    // incomplete target map before it creates anything.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
+    [CodeGen(CodeGenLevel.LookupOnly)]
+    [TypeTable(IsExcludedFromNewTypeTable = true)]
+    public interface IXamlBindScopeManifest
+    {
+        // Connection id the scope is produced from, matching the id a cold parse would have passed
+        // to GetBindingConnector on the root.
+        int RootConnectionId { get; }
+
+        // Every connection id this scope will populate. A target map that does not cover all of
+        // them is refused: a scope missing a target is silently inert, which is the failure mode
+        // this contract exists to prevent.
+        [ReturnTypeParameterName("connectionIds")]
+        [CountParameterName("length")]
+        int[] GetRequiredConnectionIds();
+
+        // Identity of this generated scope and its binding manifest.
+        string ScopeRevision { get; }
+
+        // Identity of the base tree this scope's connection ids were authored against. Compared
+        // against the revision the live root carries. The two are deliberately from different
+        // builds, so they are never required to be equal to each other, only each to its own side.
+        string ExpectedBaseTreeRevision { get; }
+    }
+
     // Optional interface a compiled-binding scope implements so the runtime can drive the two
     // lifecycle moments that a cold parse gets for free.
     //
@@ -284,6 +317,15 @@ namespace Microsoft.UI.Xaml.Markup
         // runtime cannot run the initial update or later stop the scope. Attaching it would produce
         // an inert scope and an unstoppable writer, so the request is refused instead.
         ScopeLifecycleUnsupported = 16,
+
+        // The connector does not implement IXamlBindScopeManifest, so the runtime has no
+        // authoritative statement of what the scope needs and cannot validate the target map.
+        ScopeManifestUnavailable = 17,
+
+        // The target map does not cover every connection id the scope declared it requires. A scope
+        // with an unconnected target is silently inert, which is exactly the failure this contract
+        // exists to prevent, so it is refused rather than partially attached.
+        ManifestIncomplete = 18,
     }
 
     // Truthful result of an attach/replace/detach request. The runtime never reports plain success
@@ -498,7 +540,13 @@ namespace Microsoft.UI.Xaml.Markup
         // Attaches a newly generated compiled-binding scope to an already-constructed root that does
         // not currently own one.
         //
-        // The manifest is four parallel arrays, one row per connection id:
+        // The connector must implement IXamlBindScopeManifest. Everything the generated code already
+        // knows - the root connection id, the ids the scope requires, the scope revision, and the
+        // base tree revision it was authored against - is read from there rather than restated by
+        // the caller.
+        //
+        // The caller supplies only the live objects, as three parallel arrays, one row per
+        // connection id:
         //   targetConnectionIds  the compiler-assigned connection id.
         //   targetStableNames    scope-qualified x:Name of the element, or empty when it has none.
         //                        When present the runtime resolves it independently and requires the
@@ -515,13 +563,10 @@ namespace Microsoft.UI.Xaml.Markup
         public static XamlBindScopeAttachResult TryAttachBindingScope(
             Microsoft.UI.Xaml.DependencyObject root,
             Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-            Windows.Foundation.Int32 rootConnectionId,
             Windows.Foundation.Int32[] targetConnectionIds,
             Windows.Foundation.String[] targetStableNames,
             Windows.Foundation.String[] targetTypeNames,
-            Windows.Foundation.Object[] targetObjects,
-            Windows.Foundation.String expectedBaseTreeRevision,
-            Windows.Foundation.String scopeRevision)
+            Windows.Foundation.Object[] targetObjects)
         {
             return default(XamlBindScopeAttachResult);
         }
@@ -535,13 +580,10 @@ namespace Microsoft.UI.Xaml.Markup
         public static XamlBindScopeAttachResult ReplaceBindingScope(
             Microsoft.UI.Xaml.DependencyObject root,
             Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-            Windows.Foundation.Int32 rootConnectionId,
             Windows.Foundation.Int32[] targetConnectionIds,
             Windows.Foundation.String[] targetStableNames,
             Windows.Foundation.String[] targetTypeNames,
-            Windows.Foundation.Object[] targetObjects,
-            Windows.Foundation.String expectedBaseTreeRevision,
-            Windows.Foundation.String scopeRevision)
+            Windows.Foundation.Object[] targetObjects)
         {
             return default(XamlBindScopeAttachResult);
         }

@@ -337,22 +337,18 @@ _Check_return_ HRESULT XamlBindingHelperFactoryGenerated::SetPropertyFromColorIm
 _Check_return_ HRESULT XamlBindingHelperFactoryGenerated::TryAttachBindingScopeImpl(
     _In_ xaml::IDependencyObject* root,
     _In_ xaml_markup::IComponentConnector* connector,
-    INT rootConnectionId,
     _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[],
     _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[],
     _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[],
     _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* targetObjects[],
-    _In_ HSTRING expectedBaseTreeRevision,
-    _In_ HSTRING scopeRevision,
     _Out_ xaml_markup::XamlBindScopeAttachResult* pResult)
 {
     return XamlBindScopeAttach::Attach(
-        root, connector, rootConnectionId,
+        root, connector,
         targetConnectionIdsCount, targetConnectionIds,
         targetStableNamesCount, targetStableNames,
         targetTypeNamesCount, targetTypeNames,
         targetObjectsCount, targetObjects,
-        expectedBaseTreeRevision, scopeRevision,
         false /* allowReplace */,
         pResult);
 }
@@ -360,22 +356,18 @@ _Check_return_ HRESULT XamlBindingHelperFactoryGenerated::TryAttachBindingScopeI
 _Check_return_ HRESULT XamlBindingHelperFactoryGenerated::ReplaceBindingScopeImpl(
     _In_ xaml::IDependencyObject* root,
     _In_ xaml_markup::IComponentConnector* connector,
-    INT rootConnectionId,
     _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[],
     _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[],
     _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[],
     _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* targetObjects[],
-    _In_ HSTRING expectedBaseTreeRevision,
-    _In_ HSTRING scopeRevision,
     _Out_ xaml_markup::XamlBindScopeAttachResult* pResult)
 {
     return XamlBindScopeAttach::Attach(
-        root, connector, rootConnectionId,
+        root, connector,
         targetConnectionIdsCount, targetConnectionIds,
         targetStableNamesCount, targetStableNames,
         targetTypeNamesCount, targetTypeNames,
         targetObjectsCount, targetObjects,
-        expectedBaseTreeRevision, scopeRevision,
         true /* allowReplace */,
         pResult);
 }

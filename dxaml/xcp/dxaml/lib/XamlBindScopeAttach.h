@@ -63,13 +63,10 @@ namespace DirectUI
         static _Check_return_ HRESULT Attach(
             _In_ xaml::IDependencyObject* root,
             _In_ xaml_markup::IComponentConnector* connector,
-            INT32 rootConnectionId,
             UINT32 idCount, _In_reads_(idCount) INT32* ids,
             UINT32 nameCount, _In_reads_(nameCount) HSTRING* stableNames,
             UINT32 typeCount, _In_reads_(typeCount) HSTRING* typeNames,
             UINT32 objectCount, _In_reads_(objectCount) IInspectable** objects,
-            _In_ HSTRING expectedBaseTreeRevision,
-            _In_ HSTRING scopeRevision,
             bool allowReplace,
             _Out_ Result* result);
 
