@@ -81,19 +81,15 @@ void XamlBindScopeAttach::OnRootDestroyed(_In_ CDependencyObject* root)
 _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     _In_ xaml::IDependencyObject* root,
     _In_ xaml_markup::IComponentConnector* connector,
-    INT32 rootConnectionId,
     UINT32 idCount, _In_reads_(idCount) INT32* ids,
     UINT32 nameCount, _In_reads_(nameCount) HSTRING* stableNames,
     UINT32 typeCount, _In_reads_(typeCount) HSTRING* typeNames,
     UINT32 objectCount, _In_reads_(objectCount) IInspectable** objects,
-    _In_ HSTRING expectedBaseTreeRevision,
-    _In_ HSTRING scopeRevision,
     bool allowReplace,
     _Out_ Result* result)
 {
     ZeroMemory(result, sizeof(*result));
     result->FailedConnectionId = -1;
-    IFC_RETURN(WindowsDuplicateString(scopeRevision, &result->RequestedScopeRevision));
 
     IFCPTR_RETURN(root);
     IFCPTR_RETURN(connector);
@@ -103,6 +99,26 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
 
     DXamlCore* core = DXamlCore::GetCurrent();
     IFCEXPECT_RETURN(core);
+
+    // (0) The generated side declares its own facts. A tool never restates them, so it cannot get
+    //     them wrong, and the runtime has an authoritative statement of what the scope needs.
+    ctl::ComPtr<xaml_markup::IXamlBindScopeManifest> manifest;
+    if (FAILED(ctl::ComPtr<xaml_markup::IComponentConnector>(connector).As(&manifest)) || !manifest)
+    {
+        Refuse(result, Detail::XamlBindScopeFailureDetail_ScopeManifestUnavailable);
+        return S_OK;
+    }
+
+    INT32 rootConnectionId = -1;
+    IFC_RETURN(manifest->get_RootConnectionId(&rootConnectionId));
+
+    wrl_wrappers::HString scopeRevision;
+    IFC_RETURN(manifest->get_ScopeRevision(scopeRevision.GetAddressOf()));
+
+    wrl_wrappers::HString expectedBaseTreeRevision;
+    IFC_RETURN(manifest->get_ExpectedBaseTreeRevision(expectedBaseTreeRevision.GetAddressOf()));
+
+    IFC_RETURN(WindowsDuplicateString(scopeRevision.Get(), &result->RequestedScopeRevision));
 
     auto& records = Records();
     auto existing = records.find(rootHandle);
@@ -117,7 +133,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     // Fault precedence is fixed: base tree first, then scope state, then manifest shape, then rows.
     // ---------------------------------------------------------------------------------------
 
-    // (1) Base tree revision. Dominates every other fault, and fails closed: a caller that asserts
+    // (1) Base tree revision. Dominates every other fault, and fails closed: a scope that asserts
     //     nothing, or a root that carries nothing, is refused rather than attached blindly. When the
     //     base tree disagrees the connection ids in the manifest describe a different object graph,
     //     so no row can be trusted and no target may be connected.
@@ -128,12 +144,12 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
             IFC_RETURN(revision->second.Promote(&result->ObservedBaseTreeRevision));
         }
 
-        if (IsEmpty(expectedBaseTreeRevision) || IsEmpty(result->ObservedBaseTreeRevision))
+        if (IsEmpty(expectedBaseTreeRevision.Get()) || IsEmpty(result->ObservedBaseTreeRevision))
         {
             Refuse(result, Detail::XamlBindScopeFailureDetail_BaseTreeRevisionUnavailable);
             return S_OK;
         }
-        if (!StringsEqual(expectedBaseTreeRevision, result->ObservedBaseTreeRevision))
+        if (!StringsEqual(expectedBaseTreeRevision.Get(), result->ObservedBaseTreeRevision))
         {
             Refuse(result, Detail::XamlBindScopeFailureDetail_BaseTreeRevisionMismatch);
             return S_OK;
@@ -143,7 +159,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     // (2) Scope state. Only reachable once the base tree agrees.
     if (existing != records.end())
     {
-        if (StringsEqual(scopeRevision, result->AppliedScopeRevision))
+        if (StringsEqual(scopeRevision.Get(), result->AppliedScopeRevision))
         {
             // Same scope already live. Never connect a second time: that is how duplicate writers
             // and duplicate listener registrations are created.
@@ -183,6 +199,30 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
         }
     }
 
+    // (3b) Completeness. Every id the scope declared it will populate must have a row. Without this
+    //      an omitted row produces a scope that is connected, reports success and is silently inert
+    //      for that target, which is precisely the failure mode this contract exists to prevent.
+    {
+        UINT32 requiredCount = 0;
+        wil::unique_cotaskmem_array_ptr<INT32> required;
+        IFC_RETURN(manifest->GetRequiredConnectionIds(required.size_address<UINT32>(), &required));
+        requiredCount = static_cast<UINT32>(required.size());
+
+        for (UINT32 r = 0; r < requiredCount; ++r)
+        {
+            bool found = false;
+            for (UINT32 i = 0; i < idCount && !found; ++i)
+            {
+                found = (ids[i] == required[r]);
+            }
+            if (!found)
+            {
+                Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestIncomplete, required[r]);
+                return S_OK;
+            }
+        }
+    }
+
     // (4) Row identity. The runtime resolves every named row itself, out of the root's namescope,
     //     and requires the caller's object to be that same instance. This is what catches two
     //     adjacent same-typed elements being swapped in the manifest: both casts would succeed, but
@@ -194,6 +234,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     {
         ResolvedRow row;
         row.ConnectionId = ids[i];
+        bool resolvedFromNamescope = false;
 
         if (!IsEmpty(stableNames[i]))
         {
@@ -213,6 +254,10 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
                 Refuse(result, Detail::XamlBindScopeFailureDetail_TargetIdentityMismatch, row.ConnectionId);
                 return S_OK;
             }
+
+            // Resolution came out of this root's namescope, so membership is already proven and the
+            // owner check below would be redundant.
+            resolvedFromNamescope = true;
         }
         else
         {
@@ -224,11 +269,16 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
             row.Target = objects[i];
         }
 
-        // Reachability. An unnamed row can only be validated structurally, so require the object to
-        // belong to this root's namescope. Without this an object from another live instance of the
-        // same page would be accepted.
+        // Reachability, for unnamed rows only. An unnamed row carries no independent identity, so
+        // require the object to belong to this root's namescope; without it an object from another
+        // live instance of the same page would be accepted.
+        //
+        // GetStandardNameScopeOwner walks the namescope owner chain, which exists from parse time.
+        // That matters: an app-level equivalent built on the visual tree cannot validate a root that
+        // has been constructed but never realized, which is exactly the cached-instance case this
+        // feature has to support.
         ctl::ComPtr<xaml::IDependencyObject> targetAsDO;
-        if (SUCCEEDED(row.Target.As(&targetAsDO)) && targetAsDO)
+        if (!resolvedFromNamescope && SUCCEEDED(row.Target.As(&targetAsDO)) && targetAsDO)
         {
             CDependencyObject* targetHandle = static_cast<DependencyObject*>(targetAsDO.Get())->GetHandle();
             if (targetHandle != rootHandle && targetHandle->GetStandardNameScopeOwner() != rootHandle)
@@ -313,8 +363,8 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     XamlBindScopeRecord record;
     record.Scope = scope;
     record.InstanceId = NextInstanceId();
-    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(scopeRevision, &record.ScopeRevision));
-    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(expectedBaseTreeRevision, &record.BaseTreeRevision));
+    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(scopeRevision.Get(), &record.ScopeRevision));
+    IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(expectedBaseTreeRevision.Get(), &record.BaseTreeRevision));
 
     for (const auto& row : rows)
     {
@@ -342,7 +392,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
 
     record.TargetCount = result->TargetsConnected;
     result->OwnedScopeInstanceId = record.InstanceId;
-    IFC_RETURN(WindowsDuplicateString(scopeRevision, &result->AppliedScopeRevision));
+    IFC_RETURN(WindowsDuplicateString(scopeRevision.Get(), &result->AppliedScopeRevision));
     records[rootHandle] = std::move(record);
 
     result->Status = replacing
