@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Portable, headless. No WinUI, no Windows App SDK, no package references at all, so it
+       restores and builds with nothing but the .NET SDK. It exercises the attach state machine and
+       its fault precedence; it deliberately knows nothing about elements or windows. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>LiveBindScopeProbe.Model</RootNamespace>
+    <AssemblyName>ScopeAttachModelTests</AssemblyName>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+</Project>

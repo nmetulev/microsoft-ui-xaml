@@ -46,6 +46,23 @@ namespace
         result->FailedConnectionId = failedConnectionId;
     }
 
+    // xstring_ptr::Promote has no HSTRING overload; it promotes to xstring_ptr_storage, xstring_ptr
+    // or xruntime_string_ptr. Go through xruntime_string_ptr, which owns a real runtime string
+    // handle, and hand ownership of that handle to the caller.
+    _Check_return_ HRESULT PromoteToHString(_In_ const xstring_ptr& source, _Out_ HSTRING* result)
+    {
+        *result = nullptr;
+        if (source.IsNullOrEmpty())
+        {
+            return S_OK;
+        }
+
+        xruntime_string_ptr runtimeString;
+        IFC_RETURN(source.Promote(&runtimeString));
+        *result = runtimeString.DetachHSTRING();
+        return S_OK;
+    }
+
     // A row that survived preflight: connection id plus the single live object it refers to.
     struct ResolvedRow
     {
@@ -125,7 +142,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     if (existing != records.end())
     {
         result->OwnedScopeInstanceId = existing->second.InstanceId;
-        IFC_RETURN(existing->second.ScopeRevision.Promote(&result->AppliedScopeRevision));
+        IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, &result->AppliedScopeRevision));
     }
 
     // ---------------------------------------------------------------------------------------
@@ -141,7 +158,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
         auto revision = BaseTreeRevisions().find(rootHandle);
         if (revision != BaseTreeRevisions().end())
         {
-            IFC_RETURN(revision->second.Promote(&result->ObservedBaseTreeRevision));
+            IFC_RETURN(PromoteToHString(revision->second, &result->ObservedBaseTreeRevision));
         }
 
         if (IsEmpty(expectedBaseTreeRevision.Get()) || IsEmpty(result->ObservedBaseTreeRevision))
@@ -204,20 +221,20 @@ _Check_return_ HRESULT XamlBindScopeAttach::Attach(
     //      for that target, which is precisely the failure mode this contract exists to prevent.
     {
         UINT32 requiredCount = 0;
-        wil::unique_cotaskmem_array_ptr<INT32> required;
-        IFC_RETURN(manifest->GetRequiredConnectionIds(required.size_address<UINT32>(), &required));
-        requiredCount = static_cast<UINT32>(required.size());
+        INT32* requiredIds = nullptr;
+        IFC_RETURN(manifest->GetRequiredConnectionIds(&requiredCount, &requiredIds));
+        auto freeRequired = wil::scope_exit([&requiredIds] { CoTaskMemFree(requiredIds); });
 
         for (UINT32 r = 0; r < requiredCount; ++r)
         {
             bool found = false;
             for (UINT32 i = 0; i < idCount && !found; ++i)
             {
-                found = (ids[i] == required[r]);
+                found = (ids[i] == requiredIds[r]);
             }
             if (!found)
             {
-                Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestIncomplete, required[r]);
+                Refuse(result, Detail::XamlBindScopeFailureDetail_ManifestIncomplete, requiredIds[r]);
                 return S_OK;
             }
         }
@@ -416,7 +433,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Detach(
     auto revision = BaseTreeRevisions().find(rootHandle);
     if (revision != BaseTreeRevisions().end())
     {
-        IFC_RETURN(revision->second.Promote(&result->ObservedBaseTreeRevision));
+        IFC_RETURN(PromoteToHString(revision->second, &result->ObservedBaseTreeRevision));
     }
 
     auto& records = Records();
@@ -427,7 +444,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::Detach(
         return S_OK;
     }
 
-    IFC_RETURN(existing->second.ScopeRevision.Promote(&result->AppliedScopeRevision));
+    IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, &result->AppliedScopeRevision));
     result->TargetsDetached = existing->second.TargetCount;
 
     ctl::ComPtr<xaml_markup::IXamlBindScopeLifecycle> lifecycle;
@@ -475,7 +492,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::GetAttachedScopeRevision(_In_ xaml::
     auto existing = records.find(rootHandle);
     if (existing != records.end())
     {
-        IFC_RETURN(existing->second.ScopeRevision.Promote(revision));
+        IFC_RETURN(PromoteToHString(existing->second.ScopeRevision, revision));
     }
     return S_OK;
 }
@@ -492,7 +509,7 @@ _Check_return_ HRESULT XamlBindScopeAttach::GetBaseTreeRevision(_In_ xaml::IDepe
     auto existing = revisions.find(rootHandle);
     if (existing != revisions.end())
     {
-        IFC_RETURN(existing->second.Promote(revision));
+        IFC_RETURN(PromoteToHString(existing->second, revision));
     }
     return S_OK;
 }
