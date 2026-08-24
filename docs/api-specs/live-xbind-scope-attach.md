@@ -14,7 +14,7 @@ inflated from an XBF that contained no bindings at all:
 
 Out of scope here, and owned elsewhere: stable connection ids, XBF versioning and invalidation,
 template re-expansion, and any transaction API. `DataTemplate` scopes are inspected but not solved;
-see the last section.
+see section 6.
 
 ---
 
@@ -292,7 +292,9 @@ MUTATION
 ### 2.6 Ownership slot
 
 The prototype uses a **side table keyed by the root's `CDependencyObject`**, holding the scope, both
-revisions, the connected-target count, a monotonic ownership instance id, and a desync flag.
+revisions, the connected-target count, a monotonic ownership instance id, and a desync flag. It lives
+inside the component, so every mutation goes through the validated engine rather than a public
+setter.
 
 Recommendation for production is the **attached DependencyProperty**, mirroring
 `DataTemplateComponent`: it makes the root symmetric with the templated parent, gets lifetime and
@@ -302,11 +304,81 @@ spreading the change across generated files and making it much harder to review 
 also needs more than a connector pointer, so the productized DP value should be a small record object
 rather than the bare `IComponentConnector`.
 
+### 2.7 Where the code lives
+
+The state machine is a **pure component** with no XAML dependency, which is what makes it testable
+without building `Microsoft.UI.Xaml.dll`.
+
+| Layer | Path | Role |
+|---|---|---|
+| Component | `dxaml\xcp\components\bindscope\inc\XamlBindScopeAttachCore.h` | Enums, result, `TargetRow`, `ScopeManifest`, `IScopeHost`, `ScopeAttachEngine`. |
+| Component | `dxaml\xcp\components\bindscope\XamlBindScopeAttachCore.cpp` | The whole algorithm. Opaque `ScopeObject`; never touches a `DependencyObject`. |
+| Adapter | `dxaml\xcp\dxaml\lib\XamlBindScopeAttach.cpp` | Implements `IScopeHost` over `CCoreServices::TryGetElementByName`, `CDependencyObject::GetStandardNameScopeOwner` and the `IComponentConnector` ABI; marshals `HSTRING` and arrays. No policy. |
+| ABI | `dxaml\xcp\dxaml\lib\XamlBindingHelperFactory_Partial.cpp` | Thin `*Impl` forwarders. |
+
+The production enums live in the component, so the native tests exercise the real taxonomy; the
+adapter casts component enum to projected ABI enum one to one. A cross-artifact check (case `X03` in
+the headless suite) fails if the component and the IDL ever disagree, because that cast would then
+silently report the wrong reason.
+
 ---
 
 ## 3. Evidence
 
-Fixture: `tools\LiveBindScopeAttachProbe`. **App-level simulation** on a stock, unmodified shipping
+Three independent levels, kept deliberately separate.
+
+### 3.1 Native: the production C++, compiled and run
+
+`dxaml\xcp\components\bindscope\unittests`. The scenarios live in a framework-free header
+(`BindScopeAttachScenarios.h`) so there is exactly one definition, shared by:
+
+* the TAEF unit test `Microsoft.UI.Xaml.Tests.Isolated.BindScope.vcxproj`, which follows the
+  established `components\*\unittests` pattern (imports `components\unittest.props`, defines
+  `__XAML_UNITTESTS__`, links only the precomp and stub projects) — this is the deliverable for the
+  repository, and it needs the one-time `init.cmd` bootstrap;
+* a portable runner, `run-portable.ps1`, which compiles the same production source with only a C++
+  toolchain and runs today.
+
+Portable run, `/W4 /WX` clean:
+
+```
+clean suite: 19 scenario(s), 0 failed          CLEAN RUN: PASS
+SkipBaseTreePrecedence           red=1  expectedKiller=S05 -> red    [S05]
+IdentityByTypeNotInstance        red=2  expectedKiller=S07 -> red    [S07 S13]
+SkipLifecycleRequirement         red=1  expectedKiller=S09 -> red    [S09]
+SkipDetachOnReplace              red=1  expectedKiller=S10 -> red    [S10]
+SkipCompletenessCheck            red=1  expectedKiller=S08 -> red    [S08]
+BaseTreeFailOpen                 red=1  expectedKiller=S06 -> red    [S06]
+PublishOwnershipBeforeConnect    red=1  expectedKiller=S19 -> red    [S19]
+RepeatAttachReportsAttached      red=1  expectedKiller=S02 -> red    [S02]
+SkipRootRowCheck                 red=1  expectedKiller=S16 -> red    [S16]
+mutants=9 survivors=0            MUTATION GATE: GREEN
+```
+
+Seeded mutants each disable exactly one guard, and exist only under `__XAML_UNITTESTS__`, so no
+mutant code can reach the product. A mutant counts as surviving if the suite reports no failure **or**
+if the run was truncated, so a seeded defect cannot hide by crashing.
+
+The scenarios are S01 attach and initialize · S02 repeat attach idempotence · S03 scope conflict ·
+S04 stale base refused before mutation · S05 base dominates scope · S06 fail closed · S07 same-typed
+identity swap · S08 completeness · S09 no-effect refusal · S10 replace and single writer · S11 detach
+silences the tree · S12 second detach refuses · S13 cached unrealized root · S14 unnamed foreign row ·
+S15 manifest-less connector · S16 missing root row · S17 partial connect desync · S18 duplicate id ·
+S19 ownership invisible mid-connect.
+
+### 3.2 Headless managed model: cross-model control
+
+`tools\LiveBindScopeAttachProbe\ModelTests`, a `net8.0` console suite with no package references. It
+is an independent expression of the same state machine, used as a control and to hold the
+cross-artifact taxonomy check. 21 cases plus 3 artifact checks; 9 mutants, 0 survivors.
+
+```
+tools\LiveBindScopeAttachProbe\ModelTests\run-model-tests.ps1     -> STATIC GATE: GREEN
+```
+
+### 3.3 App level: does a live page actually behave like a cold-built one
+
+`tools\LiveBindScopeAttachProbe`. **App-level simulation** on a stock, unmodified shipping
 `Microsoft.UI.Xaml.dll`; it proves the API semantics and that an externally generated connector in a
 side assembly can drive a live page like a cold-built scope. It does not prove a public runtime hook
 exists.
@@ -314,7 +386,7 @@ exists.
 Run: 20 cases, 20 passed, 196 ms, single process, current page instance never rebuilt. Full transcript
 in `tools\LiveBindScopeAttachProbe\probe-results.txt`.
 
-### Positive, against a cold-built `{x:Bind}` oracle in the same window
+#### Positive, against a cold-built `{x:Bind}` oracle in the same window
 
 | case | assertion | observed |
 |---|---|---|
@@ -333,7 +405,7 @@ in `tools\LiveBindScopeAttachProbe\probe-results.txt`.
 | T08a | same instance, same process | same object, still parented |
 | T08b | cached, never-parented instance | `Attached`, 4 connected, same instance, updates flow off-tree |
 
-### Negative controls
+#### Negative controls
 
 | case | control | observed |
 |---|---|---|
@@ -344,7 +416,7 @@ in `tools\LiveBindScopeAttachProbe\probe-results.txt`.
 | N05 | scope with no lifecycle interface | `Refused/ScopeLifecycleUnsupported`, no ownership — an `S_OK`-shaped no-effect is impossible |
 | N06 | target belonging to a different live instance of the same page type | `Refused/TargetOutsideNamescope`, 0 connects |
 
-### A design correction the fixture forced
+#### A design correction the fixture forced
 
 Run 1 was 19/20. T08b, the cached never-parented instance, was refused `TargetOutsideNamescope`,
 because an app-level reachability check must walk the visual tree and an unrealized tree has no visual
@@ -358,7 +430,55 @@ boundary.
 
 ---
 
-## 4. How this composes
+## 4. Build state
+
+Nothing in this workstream has bootstrapped the repository build. `init.cmd` has **not** been run.
+
+| | |
+|---|---|
+| `BuildOutput\` | absent |
+| `packages\` | absent |
+| NuGet cache | `C:\.tools\.nuget\packages`, 299 packages, **TAEF already cached** |
+| Disk | 674.5 GB free of 1022.8 GB (348.4 GB used) |
+| Documented footprint | ~80 GB per build flavour |
+| Toolchain | Visual Studio 2026 Enterprise 18.8.12105.206, C++ toolset present |
+
+First import failure, from an evaluation-only invocation that neither builds nor restores
+(`msbuild <proj> -t:__EvaluationOnlyProbe__`):
+
+```
+eng\projectcaching.props(20,3): error MSB4019: The imported project
+"...\packages\Microsoft.MSBuildCache.Local.0.1.268-preview\build\Microsoft.MSBuildCache.Local.props"
+was not found.
+```
+
+So the only blocker is the un-run `init.cmd` and the repo-local `packages\` restore it performs.
+Disk and toolchain are sufficient. A CI or official build environment is not required: after the
+one-time bootstrap the documented fast inner loop rebuilds a single project in seconds, and the
+component test project links only its own source plus the precomp and stub projects, so it never
+needs `Microsoft.UI.Xaml.dll`.
+
+What runs today, with no bootstrap:
+
+```
+dxaml\xcp\components\bindscope\unittests\run-portable.ps1 -Mutants
+tools\LiveBindScopeAttachProbe\ModelTests\run-model-tests.ps1
+```
+
+What needs the bootstrap:
+
+```
+msbuild dxaml\xcp\components\bindscope\unittests\Microsoft.UI.Xaml.Tests.Isolated.BindScope.vcxproj -p:Platform=x64
+msbuild dxaml\xcp\dxaml\dllsrv\winrt\native\Microsoft.ui.xaml.vcxproj -p:Platform=x64
+```
+
+The OM and IDL additions are **unbuilt and unverified**: the `*Impl` declarations the ABI forwarders
+target are produced by `XamlGen`, which runs as part of the same bootstrap. The component library does
+not depend on them; only the adapter does.
+
+---
+
+## 5. How this composes
 
 * **Versioned XBF, fresh pages.** Out of scope here. Once the XBF for the document carries the new
   root `x:ConnectionId=1`, a fresh inflation runs the normal connector path in §1.1 with no
@@ -378,7 +498,7 @@ boundary.
 
 ---
 
-## 5. `DataTemplate` boundary — inspected, not solved
+## 6. `DataTemplate` boundary — inspected, not solved
 
 How template scopes work today:
 
@@ -418,7 +538,7 @@ re-realization and recycle-pool control remain unsolved and are the actual block
 
 ---
 
-## 6. Recommendation
+## 7. Recommendation
 
 **Proceed, narrowed to the root/page case.**
 
@@ -432,5 +552,5 @@ Two things must land with it, not after it:
 * `IXamlBindScopeLifecycle`, or the API can only produce inert scopes and unstoppable writers;
 * connector-declared required ids, or an omitted row silently under-connects.
 
-Do **not** extend to `DataTemplate` in this workstream. Section 5 lists five unsolved problems there,
+Do **not** extend to `DataTemplate` in this workstream. Section 6 lists five unsolved problems there,
 and at least two of them (recycle pool, phase-loop participation) are runtime work of a different size.

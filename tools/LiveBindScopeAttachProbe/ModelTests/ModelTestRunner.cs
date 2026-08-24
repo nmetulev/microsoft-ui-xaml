@@ -400,6 +400,7 @@ namespace LiveBindScopeProbe.Model
 
             string idlPath = Path.Combine(repoRoot, "dxaml", "xcp", "dxaml", "idl", "winrt", "core", "microsoft.ui.xaml.coretypes2.idl");
             string mirrorPath = Path.Combine(repoRoot, "tools", "LiveBindScopeAttachProbe", "Probe", "Contracts.cs");
+            string componentPath = Path.Combine(repoRoot, "dxaml", "xcp", "components", "bindscope", "inc", "XamlBindScopeAttachCore.h");
 
             var idl = ParseIdlEnum(idlPath, "XamlBindScopeFailureDetail");
             var mirror = ParseCsEnum(mirrorPath, "XamlBindScopeFailureDetail");
@@ -414,6 +415,15 @@ namespace LiveBindScopeProbe.Model
             string statusDiff = Compare("idl-vs-model", idlStatus, modelStatus);
             Check("X02", "IDL and headless model agree on XamlBindScopeAttachStatus",
                 statusDiff == null, statusDiff ?? $"members={modelStatus.Count}");
+
+            // The native component carries the production enums. If it drifts from the IDL, the
+            // adapter's 1:1 cast between them silently starts reporting the wrong reason.
+            var componentDetail = ParseEnum(componentPath, "enum class FailureDetail");
+            var componentStatus = ParseEnum(componentPath, "enum class AttachStatus");
+            string componentDiff = Compare("component-vs-model", componentDetail, model)
+                ?? Compare("component-status-vs-model", componentStatus, modelStatus);
+            Check("X03", "native bindscope component agrees with the IDL taxonomy",
+                componentDiff == null, componentDiff ?? $"detail={componentDetail.Count} status={componentStatus.Count}");
         }
 
         private static string Compare(string label, Dictionary<string, int> a, Dictionary<string, int> b)
