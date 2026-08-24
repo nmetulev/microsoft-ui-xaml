@@ -10,6 +10,7 @@
 #include <CustomDependencyProperty.h>
 #include <CStaticLock.h>
 #include <vector_map.h>
+#include <XamlMetadataProviderRegistration.h>
 
 namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { 
     namespace Metadata {
@@ -114,6 +115,17 @@ namespace DirectUI
             std::size_t m_propertyFirstIndex   = 0;
         };
 
+        // A side IXamlMetadataProvider registered after startup. See XamlMetadataProviderRegistration.h.
+        struct SideMetadataProviderEntry
+        {
+            ctl::ComPtr<xaml_markup::IXamlMetadataProvider> m_provider;
+            XamlMetadataProviderId m_id = c_invalidXamlMetadataProviderId;
+
+            // The generation this entry was created at, so callers can correlate a registration
+            // result with the lookups that observed it.
+            XamlMetadataProviderGeneration m_registeredAtGeneration = 0;
+        };
+
         using PropertiesTable       = containers::vector_map<xstring_ptr, const CDependencyProperty*>;
         using PropertiesByTypeTable = std::unordered_map<KnownTypeIndex, std::unique_ptr<PropertiesTable>>;
 
@@ -135,6 +147,23 @@ namespace DirectUI
 
         // Overridden metadata provider. This primarily exists to load and unload providers for unit tests.
         ctl::ComPtr<xaml_markup::IXamlMetadataProvider> m_overriddenMetadataProvider;
+
+        // Side providers registered after startup. Consulted only as a fallback, after
+        // m_metadataProvider has already declined a name, so registering one can never change the
+        // identity of a type that already resolves. Order is registration order, but lookup never
+        // depends on it: if more than one side provider answers for the same name the lookup fails
+        // closed rather than letting whichever provider ran last win.
+        std::vector<SideMetadataProviderEntry> m_sideMetadataProviders;
+
+        // Type full names that have actually been resolved through a side provider, and the
+        // provider that resolved them. Used to reject a newly registered provider that would
+        // duplicate a name an existing side provider already owns.
+        containers::vector_map<xstring_ptr, XamlMetadataProviderId> m_sideMetadataProviderClaims;
+
+        // Bumped by every successful registration, unregistration and cache invalidation.
+        XamlMetadataProviderGeneration m_metadataProviderGeneration = 0;
+
+        XamlMetadataProviderId m_nextSideMetadataProviderId = 1;
 
         GenerationBoundary m_valid = {};
     };

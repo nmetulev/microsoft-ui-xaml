@@ -80,6 +80,14 @@ void DynamicMetadataStorage::ResetInstance()
     m_overriddenMetadataProvider            = nullptr;
     m_queuedDPRegistrations                 = nullptr;
 
+    // Drop side providers too: their backing DLLs/assemblies may be going away, and every name they
+    // resolved is about to be dropped from the caches below. Bump the generation so that anything
+    // holding a registration result can see that its registration no longer applies.
+
+    m_sideMetadataProviders.clear();
+    m_sideMetadataProviderClaims.clear();
+    ++m_metadataProviderGeneration;
+
     // Clear internal caches.
 
     m_customNamespacesByNameCache.clear();
