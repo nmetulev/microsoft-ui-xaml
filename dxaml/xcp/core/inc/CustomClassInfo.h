@@ -32,6 +32,20 @@ public:
         return m_isBindable;
     }
 
+    // True when this entry was manufactured by MetadataAPI::ImportUnknownClassInfo because no
+    // metadata provider could describe the name, i.e. it is a cached *miss* rather than a type.
+    // Only these entries are eligible for eviction by MetadataAPI::InvalidateUnresolvedTypeCache,
+    // which is what keeps already-resolved types stable across a side provider registration.
+    bool IsUnresolvedPlaceholder() const
+    {
+        return m_isUnresolvedPlaceholder;
+    }
+
+    void MarkUnresolvedPlaceholder()
+    {
+        m_isUnresolvedPlaceholder = true;
+    }
+
     void UpdateContentPropertyIndex(KnownPropertyIndex index)
     {
         m_nContentPropertyIndex = index;
@@ -56,4 +70,5 @@ private:
     KnownTypeIndex                                          m_boxedTypeIndex;
     KnownNamespaceIndex                                     m_nNamespaceIndex;
     bool                                                    m_isBindable{};
+    bool                                                    m_isUnresolvedPlaceholder{};
 };
