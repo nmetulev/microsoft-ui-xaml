@@ -70,6 +70,16 @@ public:
 
     _Check_return_ HRESULT GetIsImplicitlyResolved(_Out_ bool* pbIsImplicitlyResolved);
 
+    // Drops the record of type names that previously failed to resolve in this xml namespace.
+    // Needed when a metadata provider is registered after startup: without this, a name that was
+    // looked up (and missed) before the registration keeps short-circuiting here and never reaches
+    // the metadata layer again. Resolved types in m_mapNameToXamlType are deliberately left alone
+    // so that registration cannot change the identity of a type that already resolves.
+    void ClearKnownNotFoundTypes()
+    {
+        m_mapKnownNotFoundTypes.clear();
+    }
+
     std::shared_ptr<XamlNamespace> Clone() const override;
 
 protected:
