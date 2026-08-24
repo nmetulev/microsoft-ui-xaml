@@ -6,6 +6,7 @@
 #include "ValueBuffer.h"
 #include "DynamicValueConverter.h"
 #include "UIElement.g.h"
+#include "XamlBindScopeAttach.h"
 
 using namespace DirectUI;
 using namespace DirectUISynonyms;
@@ -326,4 +327,90 @@ _Check_return_ HRESULT XamlBindingHelperFactoryGenerated::SetPropertyFromColorIm
     IFC_RETURN(CValueBoxer::BoxValue(&boxedValue, value, &buffer));
     IFC_RETURN(SetValueImpl(pDependencyObject, pPropertyToSet, boxedValue));
     return S_OK;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Live compiled-binding scope attach. Thin forwarders; the algorithm and its rationale live in
+// XamlBindScopeAttach.cpp so the change stays reviewable and revertable as one unit.
+// ---------------------------------------------------------------------------------------------
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::TryAttachBindingScopeImpl(
+    _In_ xaml::IDependencyObject* root,
+    _In_ xaml_markup::IComponentConnector* connector,
+    INT rootConnectionId,
+    _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[],
+    _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[],
+    _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[],
+    _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* targetObjects[],
+    _In_ HSTRING expectedBaseTreeRevision,
+    _In_ HSTRING scopeRevision,
+    _Out_ xaml_markup::XamlBindScopeAttachResult* pResult)
+{
+    return XamlBindScopeAttach::Attach(
+        root, connector, rootConnectionId,
+        targetConnectionIdsCount, targetConnectionIds,
+        targetStableNamesCount, targetStableNames,
+        targetTypeNamesCount, targetTypeNames,
+        targetObjectsCount, targetObjects,
+        expectedBaseTreeRevision, scopeRevision,
+        false /* allowReplace */,
+        pResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::ReplaceBindingScopeImpl(
+    _In_ xaml::IDependencyObject* root,
+    _In_ xaml_markup::IComponentConnector* connector,
+    INT rootConnectionId,
+    _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[],
+    _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[],
+    _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[],
+    _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* targetObjects[],
+    _In_ HSTRING expectedBaseTreeRevision,
+    _In_ HSTRING scopeRevision,
+    _Out_ xaml_markup::XamlBindScopeAttachResult* pResult)
+{
+    return XamlBindScopeAttach::Attach(
+        root, connector, rootConnectionId,
+        targetConnectionIdsCount, targetConnectionIds,
+        targetStableNamesCount, targetStableNames,
+        targetTypeNamesCount, targetTypeNames,
+        targetObjectsCount, targetObjects,
+        expectedBaseTreeRevision, scopeRevision,
+        true /* allowReplace */,
+        pResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::DetachBindingScopeImpl(
+    _In_ xaml::IDependencyObject* root,
+    _Out_ xaml_markup::XamlBindScopeAttachResult* pResult)
+{
+    return XamlBindScopeAttach::Detach(root, pResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::GetAttachedBindingScopeImpl(
+    _In_ xaml::IDependencyObject* root,
+    _Outptr_result_maybenull_ xaml_markup::IComponentConnector** ppResult)
+{
+    return XamlBindScopeAttach::GetAttachedScope(root, ppResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::GetAttachedScopeRevisionImpl(
+    _In_ xaml::IDependencyObject* root,
+    _Out_ HSTRING* pResult)
+{
+    return XamlBindScopeAttach::GetAttachedScopeRevision(root, pResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::GetBaseTreeRevisionImpl(
+    _In_ xaml::IDependencyObject* root,
+    _Out_ HSTRING* pResult)
+{
+    return XamlBindScopeAttach::GetBaseTreeRevision(root, pResult);
+}
+
+_Check_return_ HRESULT XamlBindingHelperFactoryGenerated::SetBaseTreeRevisionImpl(
+    _In_ xaml::IDependencyObject* root,
+    _In_ HSTRING baseTreeRevision)
+{
+    return XamlBindScopeAttach::SetBaseTreeRevision(root, baseTreeRevision);
 }
