@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (c) Microsoft Corporation. All rights reserved. Licensed under the MIT License. See LICENSE in the project root for license information. -->
+
+<Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+    <PropertyGroup Label="Globals">
+        <ConfigurationType>DynamicLibrary</ConfigurationType>
+        <ProjectGuid>{e7633b9c-4cca-4235-a3b0-6e98f94589b9}</ProjectGuid>
+    </PropertyGroup>
+
+    <Import Project="$([MSBuild]::GetPathOfFileAbove(Xaml.Cpp.props))"/>
+    <Import Project="$(XamlSourcePath)\xcp\projectbase.props"/>
+    <Import Project="$(XcpPath)\components\unittest.props"/>
+
+    <!-- Satisfy "UT", which currently doesn't parse includes. -->
+    <!-- UT:TARGETTYPE=DYNLINK                                 -->
+    <!-- UT:TARGET_DESTINATION=NTTEST\WINDOWSTEST\dxaml\test   -->
+    <PropertyGroup>
+        <ProjectIncludeDirectories>
+            $(ProjectIncludeDirectories);
+            $(TestPath)\infra\inc;
+            $(XcpPath)\components\bindscope\inc;
+        </ProjectIncludeDirectories>
+    </PropertyGroup>
+
+    <!-- The production source is compiled directly into the test binary rather than linked from
+         Microsoft.UI.Xaml.BindScope.vcxproj. unittest.props defines __XAML_UNITTESTS__, which is what
+         makes the seeded mutants exist, and the shipping library is compiled without that define so
+         no mutant code can reach the product. Tests therefore exercise the real production state
+         machine, not a copy of it. -->
+    <ItemGroup>
+        <ClInclude Include="BindScopeAttachUnitTests.h"/>
+
+        <ClCompile Include="BindScopeAttachUnitTests.cpp"/>
+        <ClCompile Include="..\XamlBindScopeAttachCore.cpp"/>
+    </ItemGroup>
+
+    <ItemDefinitionGroup>
+        <Link>
+            <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories);$(VC_LibraryPath_VC_Desktop_CurrentPlatform_spectre);</AdditionalLibraryDirectories>
+        </Link>
+    </ItemDefinitionGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="$(XcpPath)\components\pch\ut\Microsoft.UI.Xaml.Precomp.vcxproj" Project="{0ee23677-77e1-49c9-8b89-ad1a1fd0c6f4}"/>
+    </ItemGroup>
+
+    <Import Project="$([MSBuild]::GetPathOfFileAbove(Microsoft.UI.Xaml.Build.targets))" />
+</Project>
