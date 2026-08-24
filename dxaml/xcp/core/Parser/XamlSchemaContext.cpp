@@ -1276,6 +1276,22 @@ _Check_return_ HRESULT XamlSchemaContext::FlushXamlNodeStreamCacheManager()
     return S_OK;
 }
 
+std::size_t XamlSchemaContext::ClearKnownNotFoundTypeCaches()
+{
+    std::size_t clearedNamespaces = 0;
+
+    for (auto& entry : m_mapUriToXmlNamespace)
+    {
+        if (entry.second)
+        {
+            entry.second->ClearKnownNotFoundTypes();
+            ++clearedNamespaces;
+        }
+    }
+
+    return clearedNamespaces;
+}
+
 //  Breaks a fully qualified name in the format [ns-uri]Type.Property
 //  down to its constituent parts.
 //
