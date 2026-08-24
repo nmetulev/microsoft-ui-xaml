@@ -290,6 +290,15 @@ private:
 
     _Check_return_ HRESULT FlushXamlNodeStreamCacheManager();
 
+    // Drops every cached "this type name does not exist" record held by the xml namespaces this
+    // schema context has resolved so far, and reports how many namespaces were cleared.
+    //
+    // This is the parser-level half of registering an IXamlMetadataProvider after startup:
+    // MetadataAPI::InvalidateUnresolvedTypeCache clears the metadata-level miss, and this clears the
+    // parser-level miss. Neither one is sufficient on its own. Unlike RefreshXamlSchemaContext this
+    // keeps already-resolved types, so it does not disturb a running tree.
+    std::size_t ClearKnownNotFoundTypeCaches();
+
     void InitializeSpecialXmlNamespaceMap();
 
     _Check_return_ HRESULT InitializeXamlNamespaceDefinitions();
