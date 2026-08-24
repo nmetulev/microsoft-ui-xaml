@@ -35,6 +35,7 @@
         <ClInclude Include="MockDynamicMetadataStorage.h"/>
         <ClInclude Include="MockMetadata.h"/>
         <ClInclude Include="MockXamlMetadataProvider.h"/>
+        <ClInclude Include="MockSideXamlMetadataProvider.h"/>
         <ClInclude Include="MockXamlType.h"/>
 
         <ClCompile Include="MockClassInfo.cpp"/>
