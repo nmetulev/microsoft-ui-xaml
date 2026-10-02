@@ -24,6 +24,10 @@ HRESULT DirectUI::XamlBindingHelperFactoryGenerated::QueryInterfaceImpl(_In_ REF
     {
         *ppObject = static_cast<ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics2*>(this);
     }
+    else if (InlineIsEqualGUID(iid, __uuidof(ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics3)))
+    {
+        *ppObject = static_cast<ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics3*>(this);
+    }
     else
     {
         RRETURN(ctl::AbstractActivationFactory::QueryInterfaceImpl(iid, ppObject));
@@ -482,6 +486,146 @@ Cleanup:
     if (EventEnabledApiFunctionCallStop())
     {
         XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_SetPropertyFromColor", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::TryAttachBindingScope(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_TryAttachBindingScope", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_NOTNULL(pConnector, "connector");
+    ARG_NOTNULL(targetStableNamesCount, targetStableNames, "targetStableNames");
+    ARG_NOTNULL(targetTypeNamesCount, targetTypeNames, "targetTypeNames");
+    ARG_NOTNULL(targetObjectsCount, pTargetObjects, "targetObjects");
+    ARG_VALIDRETURNPOINTER(pReturnValue);
+    *pReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(TryAttachBindingScopeImpl(pRoot, pConnector, targetConnectionIdsCount, targetConnectionIds, targetStableNamesCount, targetStableNames, targetTypeNamesCount, targetTypeNames, targetObjectsCount, pTargetObjects, pReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_TryAttachBindingScope", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::ReplaceBindingScope(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_ReplaceBindingScope", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_NOTNULL(pConnector, "connector");
+    ARG_NOTNULL(targetStableNamesCount, targetStableNames, "targetStableNames");
+    ARG_NOTNULL(targetTypeNamesCount, targetTypeNames, "targetTypeNames");
+    ARG_NOTNULL(targetObjectsCount, pTargetObjects, "targetObjects");
+    ARG_VALIDRETURNPOINTER(pReturnValue);
+    *pReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(ReplaceBindingScopeImpl(pRoot, pConnector, targetConnectionIdsCount, targetConnectionIds, targetStableNamesCount, targetStableNames, targetTypeNamesCount, targetTypeNames, targetObjectsCount, pTargetObjects, pReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_ReplaceBindingScope", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::DetachBindingScope(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_DetachBindingScope", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_VALIDRETURNPOINTER(pReturnValue);
+    *pReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(DetachBindingScopeImpl(pRoot, pReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_DetachBindingScope", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::GetAttachedBindingScope(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Outptr_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector** ppReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_GetAttachedBindingScope", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_VALIDRETURNPOINTER(ppReturnValue);
+    *ppReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(GetAttachedBindingScopeImpl(pRoot, ppReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_GetAttachedBindingScope", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::GetAttachedScopeRevision(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_GetAttachedScopeRevision", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_VALIDRETURNPOINTER(pReturnValue);
+    *pReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(GetAttachedScopeRevisionImpl(pRoot, pReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_GetAttachedScopeRevision", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::GetBaseTreeRevision(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_GetBaseTreeRevision", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_VALIDRETURNPOINTER(pReturnValue);
+    *pReturnValue={};
+    IFC(CheckActivationAllowed());
+    IFC(GetBaseTreeRevisionImpl(pRoot, pReturnValue));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_GetBaseTreeRevision", hr);
+    }
+    RRETURN(hr);
+}
+IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::SetBaseTreeRevision(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ HSTRING baseTreeRevision)
+{
+    HRESULT hr = S_OK;
+    if (EventEnabledApiFunctionCallStart())
+    {
+        XamlTelemetry::PublicApiCall(true, 0, "XamlBindingHelper_SetBaseTreeRevision", 0);
+    }
+    ARG_NOTNULL(pRoot, "root");
+    ARG_NOTNULL(baseTreeRevision, "baseTreeRevision");
+    IFC(CheckActivationAllowed());
+    IFC(SetBaseTreeRevisionImpl(pRoot, baseTreeRevision));
+Cleanup:
+    if (EventEnabledApiFunctionCallStop())
+    {
+        XamlTelemetry::PublicApiCall(false, 0, "XamlBindingHelper_SetBaseTreeRevision", hr);
     }
     RRETURN(hr);
 }

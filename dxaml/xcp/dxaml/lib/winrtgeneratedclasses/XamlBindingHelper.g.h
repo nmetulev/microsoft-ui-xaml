@@ -28,10 +28,12 @@ namespace DirectUI
        public ctl::AbstractActivationFactory
         , public ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics
         , public ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics2
+        , public ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics3
     {
         BEGIN_INTERFACE_MAP(XamlBindingHelperFactoryGenerated, ctl::AbstractActivationFactory)
             INTERFACE_ENTRY(XamlBindingHelperFactoryGenerated, ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics)
             INTERFACE_ENTRY(XamlBindingHelperFactoryGenerated, ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics2)
+            INTERFACE_ENTRY(XamlBindingHelperFactoryGenerated, ABI::Microsoft::UI::Xaml::Markup::IXamlBindingHelperStatics3)
         END_INTERFACE_MAP(XamlBindingHelperFactoryGenerated, ctl::AbstractActivationFactory)
 
     public:
@@ -72,6 +74,13 @@ namespace DirectUI
         IFACEMETHOD(SetPropertyFromThickness)(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Microsoft::UI::Xaml::Thickness value) override;
         IFACEMETHOD(SetPropertyFromCornerRadius)(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Microsoft::UI::Xaml::CornerRadius value) override;
         IFACEMETHOD(SetPropertyFromColor)(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Windows::UI::Color value) override;
+        IFACEMETHOD(TryAttachBindingScope)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue) override;
+        IFACEMETHOD(ReplaceBindingScope)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue) override;
+        IFACEMETHOD(DetachBindingScope)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue) override;
+        IFACEMETHOD(GetAttachedBindingScope)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Outptr_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector** ppReturnValue) override;
+        IFACEMETHOD(GetAttachedScopeRevision)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue) override;
+        IFACEMETHOD(GetBaseTreeRevision)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue) override;
+        IFACEMETHOD(SetBaseTreeRevision)(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ HSTRING baseTreeRevision) override;
 
         // Static events.
 
@@ -112,6 +121,13 @@ namespace DirectUI
          _Check_return_ HRESULT SetPropertyFromThicknessImpl(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Microsoft::UI::Xaml::Thickness value); 
          _Check_return_ HRESULT SetPropertyFromCornerRadiusImpl(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Microsoft::UI::Xaml::CornerRadius value); 
          _Check_return_ HRESULT SetPropertyFromColorImpl(_In_ IInspectable* pDependencyObject, _In_ ABI::Microsoft::UI::Xaml::IDependencyProperty* pPropertyToSet, ABI::Windows::UI::Color value); 
+         _Check_return_ HRESULT TryAttachBindingScopeImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue); 
+         _Check_return_ HRESULT ReplaceBindingScopeImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector* pConnector, _In_ UINT targetConnectionIdsCount, _In_reads_(targetConnectionIdsCount) INT targetConnectionIds[], _In_ UINT targetStableNamesCount, _In_reads_(targetStableNamesCount) HSTRING targetStableNames[], _In_ UINT targetTypeNamesCount, _In_reads_(targetTypeNamesCount) HSTRING targetTypeNames[], _In_ UINT targetObjectsCount, _In_reads_(targetObjectsCount) IInspectable* pTargetObjects[], _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue); 
+         _Check_return_ HRESULT DetachBindingScopeImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ ABI::Microsoft::UI::Xaml::Markup::XamlBindScopeAttachResult* pReturnValue); 
+         _Check_return_ HRESULT GetAttachedBindingScopeImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Outptr_ ABI::Microsoft::UI::Xaml::Markup::IComponentConnector** ppReturnValue); 
+         _Check_return_ HRESULT GetAttachedScopeRevisionImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue); 
+         _Check_return_ HRESULT GetBaseTreeRevisionImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _Out_ HSTRING* pReturnValue); 
+         _Check_return_ HRESULT SetBaseTreeRevisionImpl(_In_ ABI::Microsoft::UI::Xaml::IDependencyObject* pRoot, _In_ HSTRING baseTreeRevision); 
     };
 }
 
