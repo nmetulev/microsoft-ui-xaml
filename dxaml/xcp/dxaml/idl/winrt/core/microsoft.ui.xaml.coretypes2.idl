@@ -491,6 +491,46 @@ namespace Microsoft.UI.Xaml.Automation
         Other,
     };
 }
+namespace Microsoft.UI.Xaml.Markup
+{
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    enum XamlBindScopeAttachStatus
+    {
+        Attached,
+        Replaced,
+        Detached,
+        AlreadyAttached,
+        Refused,
+        Desynchronized,
+    };
+
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    enum XamlBindScopeFailureDetail
+    {
+        None,
+        BaseTreeRevisionUnavailable,
+        BaseTreeRevisionMismatch,
+        ScopeRevisionAlreadyApplied,
+        ScopeRevisionConflict,
+        ScopeNotProduced,
+        ManifestShapeInvalid,
+        ManifestDuplicateConnectionId,
+        ManifestMissingRootRow,
+        TargetNotResolvable,
+        TargetIdentityMismatch,
+        TargetTypeMismatch,
+        TargetOutsideNamescope,
+        NothingAttached,
+        DesyncScopeState,
+        DesyncBaseTree,
+        ScopeLifecycleUnsupported,
+        ScopeManifestUnavailable,
+        ManifestIncomplete,
+    };
+}
 namespace Microsoft.UI.Xaml.Hosting
 {
 
@@ -562,6 +602,21 @@ namespace Microsoft.UI.Xaml.Markup
         UInt32 LinePosition;
     };
 
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    struct XamlBindScopeAttachResult
+    {
+        Microsoft.UI.Xaml.Markup.XamlBindScopeAttachStatus Status;
+        Microsoft.UI.Xaml.Markup.XamlBindScopeFailureDetail FailureDetail;
+        String ObservedBaseTreeRevision;
+        String RequestedScopeRevision;
+        String AppliedScopeRevision;
+        UInt64 OwnedScopeInstanceId;
+        Int32 TargetsConnected;
+        Int32 TargetsDetached;
+        Int32 FailedConnectionId;
+    };
+
     [contract(Microsoft.UI.Xaml.WinUIContract, 1)]
     [webhosthidden]
     struct XmlnsDefinition
@@ -608,6 +663,8 @@ namespace Microsoft.UI.Xaml
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Automation.AutomationStyleId>;
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Automation.AutomationTextDecorationLineStyle>;
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Hosting.XamlSourceFocusNavigationReason>;
+        interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Markup.XamlBindScopeAttachStatus>;
+        interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Markup.XamlBindScopeFailureDetail>;
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Media.AlignmentX>;
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Media.AlignmentY>;
         interface Windows.Foundation.IReference<Microsoft.UI.Xaml.Media.LoadedImageSourceLoadStatus>;
@@ -2134,17 +2191,7 @@ namespace Microsoft.UI.Xaml.Markup
 
     [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
     [webhosthidden]
-    interface IXamlBindScopeManifest
-    {
-        Int32 RootConnectionId{ get; };
-        Int32[] GetRequiredConnectionIds();
-        String ScopeRevision{ get; };
-        String ExpectedBaseTreeRevision{ get; };
-    };
-
-    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
-    [webhosthidden]
-    interface IXamlBindScopeLifecycle
+    interface IXamlBindScopeLifecycle 
     {
         void InitializeScope();
         void DetachScope();
@@ -2152,54 +2199,12 @@ namespace Microsoft.UI.Xaml.Markup
 
     [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
     [webhosthidden]
-    enum XamlBindScopeAttachStatus
+    interface IXamlBindScopeManifest 
     {
-        Attached = 0,
-        Replaced = 1,
-        Detached = 2,
-        AlreadyAttached = 3,
-        Refused = 4,
-        Desynchronized = 5,
-    };
-
-    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
-    [webhosthidden]
-    enum XamlBindScopeFailureDetail
-    {
-        None = 0,
-        BaseTreeRevisionUnavailable = 1,
-        BaseTreeRevisionMismatch = 2,
-        ScopeRevisionAlreadyApplied = 3,
-        ScopeRevisionConflict = 4,
-        ScopeNotProduced = 5,
-        ManifestShapeInvalid = 6,
-        ManifestDuplicateConnectionId = 7,
-        ManifestMissingRootRow = 8,
-        TargetNotResolvable = 9,
-        TargetIdentityMismatch = 10,
-        TargetTypeMismatch = 11,
-        TargetOutsideNamescope = 12,
-        NothingAttached = 13,
-        DesyncScopeState = 14,
-        DesyncBaseTree = 15,
-        ScopeLifecycleUnsupported = 16,
-        ScopeManifestUnavailable = 17,
-        ManifestIncomplete = 18,
-    };
-
-    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
-    [webhosthidden]
-    struct XamlBindScopeAttachResult
-    {
-        Microsoft.UI.Xaml.Markup.XamlBindScopeAttachStatus Status;
-        Microsoft.UI.Xaml.Markup.XamlBindScopeFailureDetail FailureDetail;
-        String ObservedBaseTreeRevision;
-        String RequestedScopeRevision;
-        String AppliedScopeRevision;
-        UInt64 OwnedScopeInstanceId;
-        Int32 TargetsConnected;
-        Int32 TargetsDetached;
-        Int32 FailedConnectionId;
+        Int32 RootConnectionId{ get; };
+        String ScopeRevision{ get; };
+        String ExpectedBaseTreeRevision{ get; };
+        Int32[] GetRequiredConnectionIds();
     };
 
     [contract(Microsoft.UI.Xaml.WinUIContract, 10)]
@@ -2327,25 +2332,11 @@ namespace Microsoft.UI.Xaml.Markup
             static void SetPropertyFromCornerRadius(Object dependencyObject, Microsoft.UI.Xaml.DependencyProperty propertyToSet, Microsoft.UI.Xaml.CornerRadius value);
             static void SetPropertyFromColor(Object dependencyObject, Microsoft.UI.Xaml.DependencyProperty propertyToSet, Windows.UI.Color value);
         }
-
+    
         [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
         {
-            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult TryAttachBindingScope(
-                Microsoft.UI.Xaml.DependencyObject root,
-                Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-                Int32[] targetConnectionIds,
-                String[] targetStableNames,
-                String[] targetTypeNames,
-                Object[] targetObjects);
-
-            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult ReplaceBindingScope(
-                Microsoft.UI.Xaml.DependencyObject root,
-                Microsoft.UI.Xaml.Markup.IComponentConnector connector,
-                Int32[] targetConnectionIds,
-                String[] targetStableNames,
-                String[] targetTypeNames,
-                Object[] targetObjects);
-
+            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult TryAttachBindingScope(Microsoft.UI.Xaml.DependencyObject root, Microsoft.UI.Xaml.Markup.IComponentConnector connector, Int32[] targetConnectionIds, String[] targetStableNames, String[] targetTypeNames, Object[] targetObjects);
+            static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult ReplaceBindingScope(Microsoft.UI.Xaml.DependencyObject root, Microsoft.UI.Xaml.Markup.IComponentConnector connector, Int32[] targetConnectionIds, String[] targetStableNames, String[] targetTypeNames, Object[] targetObjects);
             static Microsoft.UI.Xaml.Markup.XamlBindScopeAttachResult DetachBindingScope(Microsoft.UI.Xaml.DependencyObject root);
             static Microsoft.UI.Xaml.Markup.IComponentConnector GetAttachedBindingScope(Microsoft.UI.Xaml.DependencyObject root);
             static String GetAttachedScopeRevision(Microsoft.UI.Xaml.DependencyObject root);
@@ -2462,3 +2453,4 @@ namespace Microsoft.UI.Xaml.Settings
     };
 
 }
+

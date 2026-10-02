@@ -381,15 +381,6 @@ namespace Microsoft.UI.Xaml.Markup
     [Guids(ClassGuid = "5907bcb4-ff97-47ad-8049-fa5b5da86032")]
     public static class XamlBindingHelper
     {
-
-    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), 1, ForcePrimaryInterfaceGeneration = true)]
-    [Platform(2, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_2_2)]
-    [Platform(3, typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.WinAppSDK_3_0)]
-    [PartialFactory]
-    [DXamlIdlGroup("coretypes2")]
-    [Guids(ClassGuid = "5907bcb4-ff97-47ad-8049-fa5b5da86032")]
-    public static class XamlBindingHelper
-    {
         [CodeGen(CodeGenLevel.IdlAndPartialStub)]
         public static void SuspendRendering(UIElement target)
         {
