@@ -555,9 +555,9 @@ namespace Microsoft.UI.Xaml.Markup
             Microsoft.UI.Xaml.DependencyObject root,
             Microsoft.UI.Xaml.Markup.IComponentConnector connector,
             Windows.Foundation.Int32[] targetConnectionIds,
-            Windows.Foundation.String[] targetStableNames,
-            Windows.Foundation.String[] targetTypeNames,
-            Windows.Foundation.Object[] targetObjects)
+            [Optional] Windows.Foundation.String[] targetStableNames,
+            [Optional] Windows.Foundation.String[] targetTypeNames,
+            [Optional] Windows.Foundation.Object[] targetObjects)
         {
             return default(XamlBindScopeAttachResult);
         }
@@ -572,9 +572,9 @@ namespace Microsoft.UI.Xaml.Markup
             Microsoft.UI.Xaml.DependencyObject root,
             Microsoft.UI.Xaml.Markup.IComponentConnector connector,
             Windows.Foundation.Int32[] targetConnectionIds,
-            Windows.Foundation.String[] targetStableNames,
-            Windows.Foundation.String[] targetTypeNames,
-            Windows.Foundation.Object[] targetObjects)
+            [Optional] Windows.Foundation.String[] targetStableNames,
+            [Optional] Windows.Foundation.String[] targetTypeNames,
+            [Optional] Windows.Foundation.Object[] targetObjects)
         {
             return default(XamlBindScopeAttachResult);
         }

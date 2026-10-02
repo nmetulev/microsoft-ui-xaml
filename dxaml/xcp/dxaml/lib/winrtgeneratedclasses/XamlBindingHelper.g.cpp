@@ -498,9 +498,6 @@ IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::TryAttachBindingScop
     }
     ARG_NOTNULL(pRoot, "root");
     ARG_NOTNULL(pConnector, "connector");
-    ARG_NOTNULL(targetStableNamesCount, targetStableNames, "targetStableNames");
-    ARG_NOTNULL(targetTypeNamesCount, targetTypeNames, "targetTypeNames");
-    ARG_NOTNULL(targetObjectsCount, pTargetObjects, "targetObjects");
     ARG_VALIDRETURNPOINTER(pReturnValue);
     *pReturnValue={};
     IFC(CheckActivationAllowed());
@@ -521,9 +518,6 @@ IFACEMETHODIMP DirectUI::XamlBindingHelperFactoryGenerated::ReplaceBindingScope(
     }
     ARG_NOTNULL(pRoot, "root");
     ARG_NOTNULL(pConnector, "connector");
-    ARG_NOTNULL(targetStableNamesCount, targetStableNames, "targetStableNames");
-    ARG_NOTNULL(targetTypeNamesCount, targetTypeNames, "targetTypeNames");
-    ARG_NOTNULL(targetObjectsCount, pTargetObjects, "targetObjects");
     ARG_VALIDRETURNPOINTER(pReturnValue);
     *pReturnValue={};
     IFC(CheckActivationAllowed());

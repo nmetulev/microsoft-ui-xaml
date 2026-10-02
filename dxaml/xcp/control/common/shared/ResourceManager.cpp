@@ -4,6 +4,7 @@
 #include "precomp.h"
 #include "corep.h"
 #include "xcpwindow.h"
+#include <XamlHotReloadOverrides.h>
 
 _Check_return_
 HRESULT ResourceManager::Create(
@@ -120,6 +121,13 @@ _Check_return_ HRESULT ResourceManager::TryGetLocalResource(
     *ppResource = NULL;
 
     xstring_ptr strScheme;
+
+    // Experimental hot reload markup delivery: an override registered for this exact URI wins.
+    IFC(XamlHotReloadOverrides::TryGetOverrideResource(pResourceUri, ppResource));
+    if (*ppResource)
+    {
+        goto Cleanup;
+    }
 
     IFC(UriXStringGetters::GetScheme(pResourceUri, &strScheme));
 
