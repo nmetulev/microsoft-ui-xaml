@@ -63,6 +63,7 @@
       <Link>FixMasters.cs</Link>
     </Compile>
     <Compile Include="HarvesterTests.cs" />
+    <Compile Include="HotReloadConnectionIdTests.cs" />
     <Compile Include="KnownBugs.cs" />
     <Compile Include="MetadataCacheTests.cs" />
     <Compile Include="MemberCacheTests.cs" />

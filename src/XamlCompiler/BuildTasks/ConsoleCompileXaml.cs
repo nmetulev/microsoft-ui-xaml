@@ -68,12 +68,20 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
             CompileXamlInternal core = CreateCore(ci);
             try
             {
-                core.SaveState = SavedStateManager.Load(ci.SavedStateFile);
-
-                result = core.DoExecute();
-                if (result)
+                if (ci.ForceSharedStateShutdown)
                 {
-                    core.SaveStateBeforeFinishing();
+                    result = true;
+                    core.UnloadReferences();
+                }
+                else
+                {
+                    core.SaveState = SavedStateManager.Load(ci.SavedStateFile);
+
+                    result = core.DoExecute();
+                    if (result)
+                    {
+                        core.SaveStateBeforeFinishing();
+                    }
                 }
             }
             catch (Exception e)

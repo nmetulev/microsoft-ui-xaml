@@ -115,6 +115,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.IO
         // 2. XBF format version
         public bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
+        public bool EnableHotReloadStableConnectionIds { get; set; }
         public string EnabledXamlOptionalChanges { get; set; }
         public string DisabledXamlOptionalChanges { get; set; }
         #endregion

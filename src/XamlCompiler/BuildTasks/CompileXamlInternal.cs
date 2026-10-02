@@ -63,6 +63,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private string _xamlPlatformString = null;
 
         private XamlCodeGenerator _codeGenerator;
+        private HotReloadConnectionIdLedgerSession _hotReloadConnectionIdLedgerSession;
         internal IList<string> _generatedCodeFiles = new List<string>();
         internal IList<string> _generatedXamlFiles = new List<string>();
         internal IList<string> _generatedXbfFiles = new List<string>();
@@ -180,6 +181,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // conditional XAML, etc.) should be validated against TargetPlatformMinVersion
         public bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
+        public bool EnableHotReloadStableConnectionIds { get; set; }
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
 
@@ -330,6 +332,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             UsingCSWinRT = FeatureControlFlags.HasFlag(FeatureCtrlFlags.UsingCSWinRT);
             EnableBindingDiagnostics = FeatureControlFlags.HasFlag(FeatureCtrlFlags.EnableBindingDiagnostics);
             IgnoreSpecifiedTargetPlatformMinVersion = IgnoreSpecifiedTargetPlatformMinVersion;
+            EnableHotReloadStableConnectionIds = i.EnableHotReloadStableConnectionIds;
 
             XamlApplications = GetFileItems(i.XamlApplications);
             XamlPages = GetFileItems(i.XamlPages);
@@ -832,6 +835,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // if there are no XAML files then issue a warning and exit (successfully), because we have nothing to do.
             if ((XamlApplications == null || !XamlApplications.Any()) && (XamlPages == null || XamlPages.Count == 0))
             {
+                if (!IsPass1 && !IsDesignTimeBuild)
+                {
+                    HotReloadConnectionIdLedgerSession.Clean(OutputFolderFullpath);
+                }
                 LogWarning(new XamlValidationWarningNoXaml());
                 return true;        // exit the compiler but not as a failure, just "done"
             }
@@ -855,6 +862,16 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             CleanUpSavedState();
 
             bool areGeneratedFilesListsUpdated = false;
+            bool hotReloadStableConnectionIdsEnabled =
+                !IsPass1 &&
+                !IsDesignTimeBuild &&
+                EnableHotReloadStableConnectionIds;
+            bool removedHotReloadArtifacts = false;
+            if (!IsPass1 && !IsDesignTimeBuild && !hotReloadStableConnectionIdsEnabled)
+            {
+                removedHotReloadArtifacts =
+                    HotReloadConnectionIdLedgerSession.Clean(OutputFolderFullpath);
+            }
 
             // Checking this always keeps us up-to-date, e.g. the first build after a solution load
             // prepares us for the 2nd build.
@@ -872,7 +889,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
 
-            if ((xamlTypeInfoNeeded == false) && (didAssembliesChange == false) && (didFeatureCtrlFlagsChange == false) && (didXamlOptionalChangesChange == false))
+            if (!hotReloadStableConnectionIdsEnabled &&
+                !removedHotReloadArtifacts &&
+                (xamlTypeInfoNeeded == false) &&
+                (didAssembliesChange == false) &&
+                (didFeatureCtrlFlagsChange == false) &&
+                (didXamlOptionalChangesChange == false))
             {
                 bool haveGeneratedPass2CodeFiles = ShortcutBackupRestoreGeneratedPass2Files_WhenNothingExternalHasChanged();
                 bool xamlFilesChanged = DidXAMLFilesChange();
@@ -919,6 +941,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 _projectInfo = GetProjectInfo();
                 _typeInfoCollector = new TypeInfoCollector(_schemaContext, XamlPlatform, EnableBindingDiagnostics);
+                if (hotReloadStableConnectionIdsEnabled)
+                {
+                    _hotReloadConnectionIdLedgerSession =
+                        HotReloadConnectionIdLedgerSession.Open(OutputFolderFullpath);
+                    _hotReloadConnectionIdLedgerSession.BeginPublication();
+                }
                 Type ixt = GetIXamlType(_loadedAssemblies);
                 if (ixt == null)
                 {
@@ -934,7 +962,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     // the file itself is different. Some of the feature ctrl flags will cause different code to be generated
                     // on a per page basis (i.e. EnableXBindDiagnostics), while others will only affect app.xaml (i.e. EnableWin32CodeGen).
                     // But we'll be conservative and just assume that all files need to regenerate if the flags have changed
-                    bool forceRegenerate = didAssembliesChange || didFeatureCtrlFlagsChange;
+                    bool forceRegenerate =
+                        didAssembliesChange ||
+                        didFeatureCtrlFlagsChange ||
+                        removedHotReloadArtifacts ||
+                        hotReloadStableConnectionIdsEnabled;
                     if (IsPass1 && !tif.OutOfDate() && !forceRegenerate)
                     {
                         // If the file is up to date then report the existing "on disk" generated
@@ -1079,6 +1111,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                             return false;
                         }
                     }
+
+                    if (_hotReloadConnectionIdLedgerSession != null)
+                    {
+                        foreach (XamlClassCodeInfo classCodeInfo in _classCodeInfos.Values)
+                        {
+                            classCodeInfo.PrepareHotReloadConnectionIdArtifacts();
+                        }
+                        _hotReloadConnectionIdLedgerSession.Commit();
+                    }
                 }
                 catch (TypeLoadException)
                 {
@@ -1122,6 +1163,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     Debug.Assert(isDone, "VerifyWorkDone checked failed");
                 }
                 Core.InstanceCacheManager.ClearCache();
+                if (_hotReloadConnectionIdLedgerSession != null)
+                {
+                    _hotReloadConnectionIdLedgerSession.Dispose();
+                    _hotReloadConnectionIdLedgerSession = null;
+                }
 
                 if (this.IsPass1)
                 {
@@ -2141,6 +2187,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     {
                         classCodeInfo.XamlComponentResourceLocation = GetComponentResourceLocation(tif.XamlComponentResourceLocation);
                     }
+                    if (_hotReloadConnectionIdLedgerSession != null)
+                    {
+                        classCodeInfo.EnableHotReloadConnectionIds(_hotReloadConnectionIdLedgerSession);
+                    }
                     _classCodeInfos.Add(classFullName, classCodeInfo);
                 }
                 else
@@ -2149,6 +2199,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 // Harvest the Name Fields, Event etc, from the XamlFile.
+                classCodeInfo.BeginHotReloadXamlFile(tif.ApparentRelativePath, xamlDomRoot);
                 XamlFileCodeInfo fileCodeInfo = harvester.HarvestXamlFileInfo(classCodeInfo, xamlDomRoot);
                 if (fileCodeInfo != null)
                 {
@@ -2336,6 +2387,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     TaskItemFilename tif = SourceFileManager.FindTaskItemByFullPath(fileCodeInfo.FullPathToXamlFile);
                     Debug.Assert(tif != null);
                     string hashString = xamlFilesChecksumPairs.Where(x => x.FileName == fileCodeInfo.FullPathToXamlFile).FirstOrDefault().Checksum;
+                    fileCodeInfo.SourceChecksum = hashString;
+                    fileCodeInfo.XbfOutputFilename =
+                        DisableXbfGeneration ? null : tif.XbfOutputFilename;
                     _newlyGeneratedXamlFiles.Add(new XbfFileNameInfo(tif.SourceXamlFullPath, tif.XamlGivenPath, tif.XamlOutputFilename, tif.XbfOutputFilename, hashString));
                 }
             }

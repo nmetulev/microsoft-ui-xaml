@@ -71,6 +71,7 @@
     <Compile Include="TypeInfoCollector_P.cs" />
     <Compile Include="TypeResolver_P.cs" />
     <Compile Include="XamlClassCodeInfo_P.cs" />
+    <Compile Include="HotReloadConnectionIdLedgerSession_P.cs" />
     <Compile Include="XamlCodeGenerator_P.cs" />
     <Compile Include="XamlCodeGenTypeNames_P.cs" />
     <Compile Include="XamlCompileError_P.cs" />
