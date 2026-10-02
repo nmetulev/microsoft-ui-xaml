@@ -11,6 +11,9 @@ EXPORTS
     DllCanUnloadNow                 PRIVATE
     OverrideXamlMetadataProvider    PRIVATE
     OverrideXamlResourcePropertyBag PRIVATE
+    XamlHotReload_SetMarkupOverride PRIVATE
+    XamlHotReload_ClearMarkupOverrides PRIVATE
+    XamlHotReload_InvalidateTypeCaches PRIVATE
     GetErrorContextIndex            PRIVATE
     GetHeapHandle                   PRIVATE
     XamlCheckProcessRequirements    PRIVATE

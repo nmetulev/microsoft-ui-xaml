@@ -290,6 +290,7 @@ private:
 
     _Check_return_ HRESULT FlushXamlNodeStreamCacheManager();
 
+public:
     // Drops every cached "this type name does not exist" record held by the xml namespaces this
     // schema context has resolved so far, and reports how many namespaces were cleared.
     //
@@ -299,6 +300,7 @@ private:
     // keeps already-resolved types, so it does not disturb a running tree.
     std::size_t ClearKnownNotFoundTypeCaches();
 
+private:
     void InitializeSpecialXmlNamespaceMap();
 
     _Check_return_ HRESULT InitializeXamlNamespaceDefinitions();
