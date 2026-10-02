@@ -27,6 +27,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private bool? hasPhaseAssignments;
         private string baseFileName;
         private int lastConnectionId = 0;
+        private HotReloadConnectionIdLedger hotReloadConnectionIdLedger;
+        private HotReloadConnectionIdentityMap hotReloadIdentityMap;
 
         public XamlClassCodeInfo(string classFullName, bool isApplication)
         {
@@ -309,6 +311,56 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public int NextConnectionId
         {
             get { return ++lastConnectionId; }
+        }
+
+        public void EnableHotReloadConnectionIds(HotReloadConnectionIdLedgerSession session)
+        {
+            if (session == null)
+            {
+                throw new ArgumentNullException(nameof(session));
+            }
+            if (this.hotReloadConnectionIdLedger != null)
+            {
+                throw new InvalidOperationException("Hot Reload connection IDs are already enabled for this XAML class.");
+            }
+
+            this.hotReloadConnectionIdLedger = session.GetLedger(this.ClassName.FullName);
+        }
+
+        public void BeginHotReloadXamlFile(string apparentRelativePath, XamlDomObject domRoot)
+        {
+            if (this.hotReloadConnectionIdLedger != null)
+            {
+                this.hotReloadIdentityMap =
+                    new HotReloadConnectionIdentityMap(apparentRelativePath, domRoot);
+            }
+        }
+
+        internal int GetConnectionId(
+            XamlDomObject domObject,
+            out HotReloadConnectionIdentity hotReloadIdentity)
+        {
+            if (this.hotReloadConnectionIdLedger == null)
+            {
+                hotReloadIdentity = null;
+                return this.NextConnectionId;
+            }
+            if (this.hotReloadIdentityMap == null)
+            {
+                throw new InvalidOperationException(
+                    "BeginHotReloadXamlFile must be called before harvesting connection ID elements.");
+            }
+
+            hotReloadIdentity = this.hotReloadIdentityMap.GetIdentity(domObject);
+            return this.hotReloadConnectionIdLedger.Allocate(hotReloadIdentity);
+        }
+
+        public void PrepareHotReloadConnectionIdArtifacts()
+        {
+            if (this.hotReloadConnectionIdLedger != null)
+            {
+                this.hotReloadConnectionIdLedger.PrepareArtifacts(this);
+            }
         }
     }
 }

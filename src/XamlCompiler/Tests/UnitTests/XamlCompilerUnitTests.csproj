@@ -58,6 +58,7 @@
     <Compile Include="CodeGeneratorProjectContext.cs" />
     <Compile Include="CodeGeneratorTests.cs" />
     <Compile Include="HarvesterTests.cs" />
+    <Compile Include="HotReloadConnectionIdTests.cs" />
     <Compile Include="KnownBugs.cs" />
     <Compile Include="MultipleViewTests.cs" />
     <Compile Include="StaticResourceTests.cs" />

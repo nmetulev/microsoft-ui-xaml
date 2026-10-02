@@ -22,6 +22,9 @@ namespace Win8Xaml.CompilerProxies
         static PropertyInfo _fieldDeclarationsProperty;
         static PropertyInfo _classTypeProperty;
         static MethodInfo _AddXamlFileInfoMethod;
+        static MethodInfo _enableHotReloadConnectionIdsMethod;
+        static MethodInfo _beginHotReloadXamlFileMethod;
+        static MethodInfo _prepareHotReloadConnectionIdArtifactsMethod;
         static MethodInfo _toStringMethod;
 
         object _instance;
@@ -39,6 +42,9 @@ namespace Win8Xaml.CompilerProxies
             _perXamlFileInfoProperty = _xcciType.GetProperty("PerXamlFileInfo");
             _fieldDeclarationsProperty = _xcciType.GetProperty("FieldDeclarations");
             _AddXamlFileInfoMethod = _xcciType.GetMethod("AddXamlFileInfo");
+            _enableHotReloadConnectionIdsMethod = _xcciType.GetMethod("EnableHotReloadConnectionIds");
+            _beginHotReloadXamlFileMethod = _xcciType.GetMethod("BeginHotReloadXamlFile");
+            _prepareHotReloadConnectionIdArtifactsMethod = _xcciType.GetMethod("PrepareHotReloadConnectionIdArtifacts");
             _toStringMethod = _xcciType.GetMethod("ToString");
         }
 
@@ -162,6 +168,29 @@ namespace Win8Xaml.CompilerProxies
         public void AddXamlFileInfo(XamlFileCodeInfo fileCodeInfo)
         {
             _AddXamlFileInfoMethod.Invoke(_instance, new object[] { fileCodeInfo.Instance });
+        }
+
+        public void EnableHotReloadConnectionIds(HotReloadConnectionIdLedgerSession session)
+        {
+            _enableHotReloadConnectionIdsMethod.Invoke(
+                _instance,
+                new object[] { session.Instance });
+        }
+
+        public void BeginHotReloadXamlFile(
+            string apparentRelativePath,
+            CompilerDomRootToken domRootToken)
+        {
+            _beginHotReloadXamlFileMethod.Invoke(
+                _instance,
+                new object[] { apparentRelativePath, domRootToken.Instance });
+        }
+
+        public void PrepareHotReloadConnectionIdArtifacts()
+        {
+            _prepareHotReloadConnectionIdArtifactsMethod.Invoke(
+                _instance,
+                null);
         }
 
         public override string ToString()

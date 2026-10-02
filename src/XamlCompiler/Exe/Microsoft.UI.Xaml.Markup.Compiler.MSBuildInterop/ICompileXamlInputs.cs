@@ -110,6 +110,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
         // 2. XBF format version
         bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
+        bool EnableHotReloadStableConnectionIds { get; set; }
         string EnabledXamlOptionalChanges { get; set; }
         string DisabledXamlOptionalChanges { get; set; }
     }

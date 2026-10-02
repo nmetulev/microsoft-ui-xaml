@@ -22,6 +22,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public string SourceXamlGivenPath { get; set; }
         public string XamlOutputFilename { get; set; }
+        public string XbfOutputFilename { get; set; }
+        public string SourceChecksum { get; set; }
         public bool HasEventAssignments { get; set; }
         public BindStatus BindStatus { get; set; }
         public xPropertyInfo XPropertyInfo { get; set; }

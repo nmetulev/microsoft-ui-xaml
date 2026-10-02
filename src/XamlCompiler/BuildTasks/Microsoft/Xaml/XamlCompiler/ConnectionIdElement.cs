@@ -50,7 +50,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             this.Type = domObject.Type;
             this.ApiInformation = domObject.ApiInformation;
 
-            this.ConnectionId = classCodeInfo.NextConnectionId;
+            this.ConnectionId = classCodeInfo.GetConnectionId(domObject, out HotReloadConnectionIdentity hotReloadIdentity);
+            this.HotReloadIdentity = hotReloadIdentity;
             this.LineNumberInfo = new LineNumberInfo(domObject);
             this.ParentFileCodeInfo = fileCodeInfo;
             this.Children = new List<ConnectionIdElement>();
@@ -168,6 +169,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public XamlFileCodeInfo ParentFileCodeInfo { get; private set; }
         public XamlType Type { get; set; }
         public int ConnectionId { get; }
+        internal HotReloadConnectionIdentity HotReloadIdentity { get; }
         public string ElementName { get; }
         public FieldDefinition FieldDefinition { get; set; }
         public bool HasFieldDefinition { get { return this.FieldDefinition != null; } }
