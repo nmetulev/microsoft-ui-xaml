@@ -79,6 +79,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
              Each element is passed verbatim to XamlOptionalChanges.EnableChange() or DisableChange(). -->
         <EnabledXamlOptionalChanges Condition="'$(EnabledXamlOptionalChanges)' == ''"></EnabledXamlOptionalChanges>
         <DisabledXamlOptionalChanges Condition="'$(DisabledXamlOptionalChanges)' == ''"></DisabledXamlOptionalChanges>
+        <EnableHotReloadStableConnectionIds Condition="'$(EnableHotReloadStableConnectionIds)' == ''">false</EnableHotReloadStableConnectionIds>
 
         <!-- Determine whether we are building for Win32 or UWP, while respecting any overrides..-->
 
@@ -181,6 +182,18 @@ Licensed under the MIT License. See LICENSE in the project root for license info
         <!-- Use Intermediate dir if XamlGeneratedOutputPath is not defined -->
         <XamlGeneratedOutputPath Condition="'$(XamlGeneratedOutputPath)' == ''">$(IntermediateOutputPath)</XamlGeneratedOutputPath>
     </PropertyGroup>
+
+    <Target Name="_CleanXamlHotReloadArtifactsForEmptyProject"
+            BeforeTargets="PrepareForBuild"
+            Condition="'@(Page)' == '' And '@(ApplicationDefinition)' == '' And Exists('$(XamlGeneratedOutputPath)XamlHotReload')">
+        <RemoveDir Directories="$(XamlGeneratedOutputPath)XamlHotReload" />
+    </Target>
+
+    <Target Name="_CleanXamlHotReloadArtifacts"
+            BeforeTargets="CoreClean"
+            Condition="Exists('$(XamlGeneratedOutputPath)XamlHotReload')">
+        <RemoveDir Directories="$(XamlGeneratedOutputPath)XamlHotReload" />
+    </Target>
 
     <PropertyGroup Condition="$(XamlCompilerTaskPath) == ''">
         <XamlCompilerTaskPath>$(_MuxPackageToolsFolder)Microsoft.UI.Xaml.Markup.Compiler.dll</XamlCompilerTaskPath>
@@ -418,6 +431,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 VCInstallPath64="$(VCInstallPath64)"
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+                EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -471,6 +485,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             VCInstallPath64="$(VCInstallPath64)"
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+            EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
             DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 
@@ -548,6 +563,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 VCInstallPath64="$(VCInstallPath64)"
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+                EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -601,6 +617,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 VCInstallPath64="$(VCInstallPath64)"
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+                EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 
@@ -726,6 +743,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 VCInstallPath64="$(VCInstallPath64)"
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+                EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -788,6 +806,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             VCInstallPath64="$(VCInstallPath64)"
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
+            EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
             DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 

@@ -109,6 +109,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
         // 2. XBF format version
         public bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
+        public bool EnableHotReloadStableConnectionIds { get; set; }
         public string EnabledXamlOptionalChanges { get; set; }
         public string DisabledXamlOptionalChanges { get; set; }
 
@@ -122,6 +123,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
             r.CompileMode = i.CompileMode;
             r.DisableXbfGeneration = i.DisableXbfGeneration;
             r.DisableXbfLineInfo = i.DisableXbfLineInfo;
+            r.EnableHotReloadStableConnectionIds = i.EnableHotReloadStableConnectionIds;
             r.EnableXBindDiagnostics = i.EnableXBindDiagnostics;
             r.FeatureControlFlags = i.FeatureControlFlags;
             r.FingerprintIgnorePaths = i.FingerprintIgnorePaths;

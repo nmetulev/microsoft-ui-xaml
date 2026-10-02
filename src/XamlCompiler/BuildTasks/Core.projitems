@@ -170,6 +170,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\XamlCodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CompileError.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\ConnectionIdElement.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\HotReloadConnectionIdLedger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\EventAssignment.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\FieldDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\LineNumberInfo.cs" />
@@ -215,6 +216,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="$(MSBuildThisFileDirectory)Core.bp" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFrameworkIdentifier)' == '.NETFramework'">
+    <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
   <ItemGroup>
     <Service Include="{508349B6-6B84-4DF5-91F0-309BEEBAD82D}" />

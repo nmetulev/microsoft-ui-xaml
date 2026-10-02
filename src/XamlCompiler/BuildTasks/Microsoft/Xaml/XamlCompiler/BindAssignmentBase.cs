@@ -57,6 +57,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public virtual LanguageSpecificString ObjectDeferredAssignmentCodeName => new LanguageSpecificString(() => string.Format("{0}{1}DeferredValue", ConnectionIdElement.ObjectCodeName, MemberName));
 
         public string MemberName => bindMember.Member.Name;
+        internal string PathExpression => GetBindingPath(bindItem);
 
         public virtual string MemberFullName => string.Format("{0}.{1}", MemberDeclaringType.UnderlyingType.FullName, MemberName);
 
