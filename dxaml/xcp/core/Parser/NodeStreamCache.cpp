@@ -11,6 +11,7 @@
 #include <MsResourceHelpers.h>
 #include <ParserAPI.h>
 #include <winuri.h>
+#include <XamlHotReloadOverrides.h>
 
 using namespace Parser;
 
@@ -132,6 +133,14 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
     bool isNewResource = false;
 
     spXbfResourceOut = nullptr;
+
+    // A hot reload override with TEXT markup replaces the compiled .xbf entirely: report no binary
+    // resource (and cache nothing) so the caller parses the overriding .xaml text instead.
+    if (auto probe = XamlHotReloadOverrides::g_textOverrideProbe.load();
+        probe && probe(strUri.GetBuffer(), strUri.GetCount()))
+    {
+        return S_OK;
+    }
 
     auto itXbfResource = m_UriToXbfResourceMap.find(strUri);
     if (itXbfResource == m_UriToXbfResourceMap.end())

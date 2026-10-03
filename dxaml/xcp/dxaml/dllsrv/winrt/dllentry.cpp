@@ -350,6 +350,30 @@ extern "C" HRESULT WINAPI XamlHotReload_ClearMarkupOverrides()
     return S_OK;
 }
 
+// Registers (or, with null, removes) a callback invoked after every successful Application.LoadComponent
+// with the component and its URI. A hot reload agent uses it to wire fields, event handlers and bindings
+// onto a component built from text markup that the XAML compiler never saw.
+extern "C" HRESULT WINAPI XamlHotReload_SetLoadCallback(_In_opt_ XamlHotReloadOverrides::LoadCallback callback, _In_opt_ void* context)
+{
+    XamlHotReloadOverrides::SetLoadCallback(callback, context);
+    return S_OK;
+}
+
+// Adds an IXamlMetadataProvider consulted after the app's own provider, so types created during a hot reload
+// session (for example a new page) resolve without regenerating the app's XamlTypeInfo. Clears cached misses.
+extern "C" HRESULT WINAPI XamlHotReload_InvalidateTypeCaches();
+extern "C" HRESULT WINAPI XamlHotReload_RegisterMetadataProvider(_In_ xaml_markup::IXamlMetadataProvider* provider)
+{
+    auto result = MetadataAPI::RegisterSideMetadataProvider(provider);
+    if (result.Status != XamlMetadataProviderRegistrationStatus::Registered &&
+        result.Status != XamlMetadataProviderRegistrationStatus::AlreadyRegistered)
+    {
+        return E_FAIL;
+    }
+
+    return XamlHotReload_InvalidateTypeCaches();
+}
+
 // Forgets every cached "type not found" answer so types added by a hot reload (for example a new
 // page whose metadata arrived through an applied code update) resolve on the next lookup.
 extern "C" HRESULT WINAPI XamlHotReload_InvalidateTypeCaches()
