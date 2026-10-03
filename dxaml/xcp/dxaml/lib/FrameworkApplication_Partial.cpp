@@ -27,6 +27,7 @@
 #include <Microsoft.Windows.ApplicationModel.Resources.h>
 #include "GamepadKeyRoutingLightup.h"
 #include <OptionalChangeState.h>
+#include <XamlHotReloadOverrides.h>
 
 using namespace RuntimeFeatureBehavior;
 using namespace DirectUI;
@@ -563,6 +564,9 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
     }
 
     IFC_RETURN(hr);
+
+    // Experimental hot reload: let a registered agent finish wiring a component that was just built from markup.
+    XamlHotReloadOverrides::InvokeLoadCallback(pComponent, strUri.GetBuffer());
 
     // If the component was not pegged at got pegged during this call
     // then ensure that we restore the initial state.

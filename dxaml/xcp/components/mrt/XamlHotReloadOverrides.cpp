@@ -58,6 +58,7 @@ _Check_return_ HRESULT XamlHotReloadOverrides::SetOverride(_In_z_ const WCHAR* u
     else
     {
         map[key] = filePath;
+        g_textOverrideProbe = &XamlHotReloadOverrides::HasTextOverride;
     }
     s_hasOverrides = !map.empty();
     return S_OK;
@@ -68,6 +69,46 @@ void XamlHotReloadOverrides::ClearAll()
     std::lock_guard<std::mutex> guard(OverrideLock());
     OverrideMap().clear();
     s_hasOverrides = false;
+}
+
+bool XamlHotReloadOverrides::HasTextOverride(_In_reads_(count) const WCHAR* uri, size_t count)
+{
+    if (!s_hasOverrides || uri == nullptr)
+    {
+        return false;
+    }
+
+    const std::wstring key = NormalizeUri(uri, count);
+    std::lock_guard<std::mutex> guard(OverrideLock());
+    auto& map = OverrideMap();
+    auto it = map.find(key);
+    if (it == map.end() || it->second.size() < 5)
+    {
+        return false;
+    }
+
+    const std::wstring& path = it->second;
+    return _wcsicmp(path.c_str() + path.size() - 5, L".xaml") == 0;
+}
+
+namespace
+{
+    std::atomic<XamlHotReloadOverrides::LoadCallback> s_loadCallback{ nullptr };
+    std::atomic<void*> s_loadCallbackContext{ nullptr };
+}
+
+void XamlHotReloadOverrides::SetLoadCallback(_In_opt_ LoadCallback callback, _In_opt_ void* context)
+{
+    s_loadCallbackContext = context;
+    s_loadCallback = callback;
+}
+
+void XamlHotReloadOverrides::InvokeLoadCallback(_In_ IInspectable* component, _In_z_ const WCHAR* uri)
+{
+    if (auto callback = s_loadCallback.load())
+    {
+        callback(component, uri, s_loadCallbackContext.load());
+    }
 }
 
 _Check_return_ HRESULT XamlHotReloadOverrides::TryGetOverrideResource(_In_ IPALUri* pUri, _Outptr_result_maybenull_ IPALResource** ppResource)
