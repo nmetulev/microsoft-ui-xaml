@@ -14,6 +14,8 @@ EXPORTS
     XamlHotReload_SetMarkupOverride PRIVATE
     XamlHotReload_ClearMarkupOverrides PRIVATE
     XamlHotReload_InvalidateTypeCaches PRIVATE
+    XamlHotReload_SetLoadCallback PRIVATE
+    XamlHotReload_RegisterMetadataProvider PRIVATE
     GetErrorContextIndex            PRIVATE
     GetHeapHandle                   PRIVATE
     XamlCheckProcessRequirements    PRIVATE
