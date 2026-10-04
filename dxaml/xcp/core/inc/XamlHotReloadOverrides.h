@@ -42,4 +42,8 @@ namespace XamlHotReloadOverrides
     typedef void (WINAPI *LoadCallback)(_In_ IInspectable* component, _In_z_ const WCHAR* uri, _In_opt_ void* context);
     void SetLoadCallback(_In_opt_ LoadCallback callback, _In_opt_ void* context);
     void InvokeLoadCallback(_In_ IInspectable* component, _In_z_ const WCHAR* uri);
+
+    // Forgets cached default styles of app and library types so their themes/generic.xaml is looked up
+    // again (implemented in the framework's DefaultStyles.cpp). Call on the UI thread.
+    void ClearCustomDefaultStyles();
 }

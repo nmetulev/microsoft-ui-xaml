@@ -318,6 +318,9 @@ namespace
 {
     HRESULT FlushXamlHotReloadCaches()
     {
+        // Library and app default styles (themes/generic.xaml) may now resolve to new markup.
+        XamlHotReloadOverrides::ClearCustomDefaultStyles();
+
         CCoreServices* core = DXamlServices::GetHandle();
         if (core)
         {
