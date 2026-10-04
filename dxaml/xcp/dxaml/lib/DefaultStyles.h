@@ -150,6 +150,10 @@ namespace DirectUI
 
             void Clear();
 
+            // Forgets cached default styles for app and library types (their themes/generic.xaml), keeping the
+            // framework's theme resources. Used by hot reload when markup overrides change.
+            void ClearCustomStyles();
+
             bool IsGenericXamlFilePathAvailableFromMUX() const;
     };
 

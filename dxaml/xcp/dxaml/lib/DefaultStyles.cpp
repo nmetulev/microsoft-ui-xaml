@@ -17,6 +17,7 @@
 #include "xcperrorresource.h"
 #include <wininet.h>
 #include <OptionalChangeState.h>
+#include <XamlHotReloadOverrides.h>
 
 using namespace DirectUI;
 using namespace xaml_hosting;
@@ -506,6 +507,24 @@ void StyleCache::Clear()
 
     m_fLoadedThemeXaml = FALSE;
     m_fLoadGenericXaml = FALSE;
+}
+
+void StyleCache::ClearCustomStyles()
+{
+    m_stylesMap.clear();
+    ctl::release_interface(m_pAppStyles);
+    m_fLoadedAppStyles = FALSE;
+}
+
+void XamlHotReloadOverrides::ClearCustomDefaultStyles()
+{
+    if (auto core = DXamlCore::GetCurrent())
+    {
+        if (auto defaultStyles = core->GetDefaultStyles())
+        {
+            defaultStyles->GetStyleCache()->ClearCustomStyles();
+        }
+    }
 }
 
 _Check_return_ HRESULT StyleCache::GetStyles(

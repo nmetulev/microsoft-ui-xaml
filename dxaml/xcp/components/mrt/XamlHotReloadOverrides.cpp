@@ -36,6 +36,14 @@ namespace
         {
             ch = static_cast<WCHAR>(std::towlower(ch));
         }
+
+        // Default-style and resource lookups use the ms-resource:///Files/ form of an app or library file;
+        // overrides are registered with the ms-appx:/// form. Treat them as the same file.
+        static const std::wstring msResourceFiles = L"ms-resource:///files/";
+        if (key.compare(0, msResourceFiles.size(), msResourceFiles) == 0)
+        {
+            key = L"ms-appx:///" + key.substr(msResourceFiles.size());
+        }
         return key;
     }
 }
