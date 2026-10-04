@@ -324,6 +324,16 @@ namespace
         CCoreServices* core = DXamlServices::GetHandle();
         if (core)
         {
+            // Errors from a previous failed reload must not be re-reported for the next parse: the parser wraps
+            // converter failures with the error service's FIRST recorded error.
+            IErrorService* errorService = nullptr;
+            if (SUCCEEDED(core->getErrorService(&errorService)) && errorService)
+            {
+                errorService->CleanupErrors();
+            }
+        }
+        if (core)
+        {
             std::shared_ptr<XamlNodeStreamCacheManager> cacheManager;
             IFC_RETURN(core->GetXamlNodeStreamCacheManager(cacheManager));
             if (cacheManager)
