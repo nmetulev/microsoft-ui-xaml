@@ -126,6 +126,10 @@ private:
     containers::vector_map<const void*, std::shared_ptr<XamlBinaryFormatReader2>> m_XBFv2ReaderCache;
     std::vector<std::shared_ptr<XamlBinaryFormatReader2>> m_staleXBFv2Readers;
     std::vector<xref_ptr<IPALResource>> m_XbfResourceStorage;
+
+    // Resources in long term storage by the file they map, kept across Flush() so a reload of the same file
+    // after a flush reuses its existing mapping (and XBFv2 reader) instead of mapping the file again.
+    std::unordered_map<xstring_ptr, xref_ptr<IPALResource>> m_fileToStoredXbfResource;
 };
 
 
