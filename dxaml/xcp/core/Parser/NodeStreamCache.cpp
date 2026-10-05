@@ -191,8 +191,27 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
             }
             else
             {
+                // A resource for the same FILE created before a Flush() is reused rather than mapping the
+                // file again (each mapping is held until shutdown). Keyed by file path, not URI: a hot reload
+                // override can point the same URI at a different file. Resources without a file (embedded in a
+                // .pri) can't change while the app runs, so their physical URI identifies them.
+                xstring_ptr strStorageKey;
+                if (FAILED(spXbfResource->TryGetFilePath(&strStorageKey)) || strStorageKey.IsNullOrEmpty())
+                {
+                    strStorageKey = strPhysicalUri;
+                }
+
+                auto itStored = m_fileToStoredXbfResource.find(strStorageKey);
+                if (itStored != m_fileToStoredXbfResource.end())
+                {
+                    spXbfResource = itStored->second;
+                }
+                else
+                {
+                    m_fileToStoredXbfResource.insert({ strStorageKey, spXbfResource });
+                    isNewResource = true;
+                }
                 m_UriToXbfResourceMap.insert({ strPhysicalUri, spXbfResource });
-                isNewResource = true;
             }
         }
         else
