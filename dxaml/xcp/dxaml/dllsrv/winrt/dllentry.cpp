@@ -338,8 +338,10 @@ namespace
             IFC_RETURN(core->GetXamlNodeStreamCacheManager(cacheManager));
             if (cacheManager)
             {
+                // Only the URI->node list/resource lookups are dropped. Compiled .xbf files are not rewritten
+                // while the app runs, so their mappings and XBFv2 readers stay cached; resetting the readers
+                // here would retire every reader into a list kept until shutdown on each reload.
                 cacheManager->Flush();
-                IFC_RETURN(cacheManager->ResetCachedXbfV2Readers());
             }
         }
         return S_OK;
