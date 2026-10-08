@@ -15,9 +15,6 @@
 #include <XamlTraceLogging.h>
 #include "XamlTelemetry.h"
 #include "LoadLibraryAbs.h"
-#include <NodeStreamCache.h>
-#include <XamlSchemaContext.h>
-#include <XamlHotReloadOverrides.h>
 
 #include <WinUIrc.ver>           //  To define VER_FILEVERSION_STR
 
@@ -311,99 +308,6 @@ extern "C" void WINAPI OverrideXamlResourcePropertyBag(_In_opt_ std::map<std::ws
 {
     CCoreServices* core = DXamlServices::GetHandle();
     core->OverrideResourcePropertyBag(propertyBag);
-}
-
-// Experimental hot reload exports. Call on the UI thread of the app.
-namespace
-{
-    HRESULT FlushXamlHotReloadCaches()
-    {
-        // Library and app default styles (themes/generic.xaml) may now resolve to new markup.
-        XamlHotReloadOverrides::ClearCustomDefaultStyles();
-
-        CCoreServices* core = DXamlServices::GetHandle();
-        if (core)
-        {
-            // Errors from a previous failed reload must not be re-reported for the next parse: the parser wraps
-            // converter failures with the error service's FIRST recorded error.
-            IErrorService* errorService = nullptr;
-            if (SUCCEEDED(core->getErrorService(&errorService)) && errorService)
-            {
-                errorService->CleanupErrors();
-            }
-        }
-        if (core)
-        {
-            std::shared_ptr<XamlNodeStreamCacheManager> cacheManager;
-            IFC_RETURN(core->GetXamlNodeStreamCacheManager(cacheManager));
-            if (cacheManager)
-            {
-                // Only the URI->node list/resource lookups are dropped. Compiled .xbf files are not rewritten
-                // while the app runs, so their mappings and XBFv2 readers stay cached; resetting the readers
-                // here would retire every reader into a list kept until shutdown on each reload.
-                cacheManager->Flush();
-            }
-        }
-        return S_OK;
-    }
-}
-
-// Redirects a local markup URI (for example ms-appx:///MainPage.xbf) to a file holding freshly
-// compiled markup, so the next LoadComponent for that URI parses it. A null or empty filePath
-// removes the override.
-extern "C" HRESULT WINAPI XamlHotReload_SetMarkupOverride(_In_z_ LPCWSTR uri, _In_opt_z_ LPCWSTR filePath)
-{
-    IFC_RETURN(XamlHotReloadOverrides::SetOverride(uri, filePath));
-    IFC_RETURN(FlushXamlHotReloadCaches());
-    return S_OK;
-}
-
-extern "C" HRESULT WINAPI XamlHotReload_ClearMarkupOverrides()
-{
-    XamlHotReloadOverrides::ClearAll();
-    IFC_RETURN(FlushXamlHotReloadCaches());
-    return S_OK;
-}
-
-// Registers (or, with null, removes) a callback invoked after every successful Application.LoadComponent
-// with the component and its URI. A hot reload agent uses it to wire fields, event handlers and bindings
-// onto a component built from text markup that the XAML compiler never saw.
-extern "C" HRESULT WINAPI XamlHotReload_SetLoadCallback(_In_opt_ XamlHotReloadOverrides::LoadCallback callback, _In_opt_ void* context)
-{
-    XamlHotReloadOverrides::SetLoadCallback(callback, context);
-    return S_OK;
-}
-
-// Adds an IXamlMetadataProvider consulted after the app's own provider, so types created during a hot reload
-// session (for example a new page) resolve without regenerating the app's XamlTypeInfo. Clears cached misses.
-extern "C" HRESULT WINAPI XamlHotReload_InvalidateTypeCaches();
-extern "C" HRESULT WINAPI XamlHotReload_RegisterMetadataProvider(_In_ xaml_markup::IXamlMetadataProvider* provider)
-{
-    auto result = MetadataAPI::RegisterSideMetadataProvider(provider);
-    if (result.Status != XamlMetadataProviderRegistrationStatus::Registered &&
-        result.Status != XamlMetadataProviderRegistrationStatus::AlreadyRegistered)
-    {
-        return E_FAIL;
-    }
-
-    return XamlHotReload_InvalidateTypeCaches();
-}
-
-// Forgets every cached "type not found" answer so types added by a hot reload (for example a new
-// page whose metadata arrived through an applied code update) resolve on the next lookup.
-extern "C" HRESULT WINAPI XamlHotReload_InvalidateTypeCaches()
-{
-    MetadataAPI::InvalidateUnresolvedTypeCache();
-    CCoreServices* core = DXamlServices::GetHandle();
-    if (core)
-    {
-        auto schemaContext = core->GetSchemaContext();
-        if (schemaContext)
-        {
-            schemaContext->ClearKnownNotFoundTypeCaches();
-        }
-    }
-    return S_OK;
 }
 
 extern "C" DWORD WINAPI GetErrorContextIndex()

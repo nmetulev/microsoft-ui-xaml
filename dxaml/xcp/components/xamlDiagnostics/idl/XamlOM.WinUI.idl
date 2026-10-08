@@ -56,5 +56,76 @@ interface IXamlDiagnostics2 : IUnknown
         [out, size_is(, *pCount)] InstanceHandle** ppInstanceHandles);
 };
 
+// Experimental: XAML hot reload.
+//
+// Lets a diagnostics tool (the tap dll this instance was sited on) replace the markup of the app's own pages,
+// controls and resource dictionaries while the app runs. It is only reachable by querying the XamlDiagnostics
+// instance passed to the tap's SetSite, and only works in apps built with the hot reload stamp: the XAML compiler
+// writes Microsoft.UI.Xaml.HotReload.enabled to the app's output (package root) for Debug builds, or when the
+// project sets EnableXamlHotReload=true. Without the stamp every method returns E_XAMLHOTRELOAD_NOTENABLED.
+
+cpp_quote("#define E_XAMLHOTRELOAD_NOTENABLED MAKE_HRESULT(SEVERITY_ERROR, FACILITY_XAML, 41L)")
+
+typedef enum XamlMarkupKind
+{
+    // XAML text, exactly as a .xaml file would hold it (UTF-8 or UTF-16 with BOM).
+    XamlMarkupKind_Text = 0,
+    // Compiled binary XAML, exactly as a .xbf file would hold it.
+    XamlMarkupKind_Binary = 1,
+} XamlMarkupKind;
+
+// IXamlComponentLoadedCallback: implemented by the tool. Called on the loading thread after every successful
+// Application.LoadComponent (which InitializeComponent calls), so the tool can finish wiring a component built
+// from replaced markup. A failure returned by the callback is ignored.
+[
+    object,
+    uuid(BF866A3C-A025-4CA8-AB23-AFC59DA45B11),
+    pointer_default(unique)
+]
+interface IXamlComponentLoadedCallback : IUnknown
+{
+    HRESULT OnComponentLoaded(
+        [in] IInspectable* component,
+        [in, string] LPCWSTR uri);
+};
+
+// IXamlHotReloadService: implemented by WinUI 3's XamlDiagnostics instance. Callable from any thread; each UI
+// thread refreshes its caches on its next load.
+[
+    object,
+    uuid(73A07052-1BFE-40CD-8DC4-FB3D7A5BCECF),
+    pointer_default(unique)
+]
+interface IXamlHotReloadService : IUnknown
+{
+    // Later loads of uri (ms-appx:///<path>.xaml or .xbf, or the equivalent ms-resource:///Files/<path>) read
+    // content instead of the app's built file. The content is copied. Only the app's own and its libraries' markup
+    // can be replaced; WinUI's own resources are refused with E_INVALIDARG.
+    HRESULT SetComponentMarkup(
+        [in, string] LPCWSTR uri,
+        [in] XamlMarkupKind kind,
+        [in] UINT32 size,
+        [in, size_is(size)] const BYTE* content);
+
+    // Restores the built markup for uri, or for every replaced URI when uri is null.
+    HRESULT RemoveComponentMarkup(
+        [in, unique, string] LPCWSTR uri);
+
+    HRESULT AdviseComponentLoaded(
+        [in] IXamlComponentLoadedCallback* callback,
+        [out] DWORD* cookie);
+
+    HRESULT UnadviseComponentLoaded(
+        [in] DWORD cookie);
+
+    // Adds a provider (Microsoft.UI.Xaml.Markup.IXamlMetadataProvider) consulted after the app's own one, for types
+    // created while the app runs. It can only supply names that would otherwise not resolve.
+    HRESULT RegisterMetadataProvider(
+        [in] IInspectable* provider);
+
+    // Forgets earlier "type not found" answers, after the tool made new types available.
+    HRESULT InvalidateTypeCaches();
+};
+
 cpp_quote("#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */ ")
 cpp_quote("#pragma endregion")

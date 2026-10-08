@@ -560,6 +560,22 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
         IFCEXPECT_RETURN(pCoreDO);
     }
 
+    // Hot reload: once replaced markup changed, earlier parse failures must not be reported again for this load (the
+    // parser wraps a converter failure with the error service's FIRST recorded error).
+    {
+        static thread_local std::uint32_t s_seenMarkupGeneration = 0;
+        const std::uint32_t generation = XamlHotReloadOverrides::g_markupGeneration.load(std::memory_order_relaxed);
+        if (generation != s_seenMarkupGeneration)
+        {
+            s_seenMarkupGeneration = generation;
+            IErrorService* errorService = nullptr;
+            if (SUCCEEDED(pCore->GetHandle()->getErrorService(&errorService)) && errorService)
+            {
+                errorService->CleanupErrors();
+            }
+        }
+    }
+
     HRESULT hr = CoreImports::Application_LoadComponent(
         pCore->GetHandle(),
         pCoreDO,
@@ -575,8 +591,8 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
 
     IFC_RETURN(hr);
 
-    // Experimental hot reload: let a registered agent finish wiring a component that was just built from markup.
-    XamlHotReloadOverrides::InvokeLoadCallback(pComponent, strUri.GetBuffer());
+    // Hot reload: tools subscribed through IXamlHotReloadService finish wiring a component built from replaced markup.
+    XamlHotReloadOverrides::InvokeLoadCallbacks(pComponent, strUri.GetBuffer());
 
     // If the component was not pegged at got pegged during this call
     // then ensure that we restore the initial state.

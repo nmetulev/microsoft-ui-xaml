@@ -4,46 +4,51 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 
-// Experimental hot reload markup delivery channel.
-//
-// A hot reload agent running inside the app can redirect a local resource URI
-// (for example ms-appx:///MainPage.xbf) to a file on disk that holds freshly
-// compiled markup. Every local resource lookup consults this table first, so
-// the next Application.LoadComponent / InitializeComponent for that URI parses
-// the new markup, including URIs that did not exist when the app was packaged
-// (new pages).
+// Experimental XAML hot reload support. The only entry point is IXamlHotReloadService on the XamlDiagnostics
+// instance a diagnostics tool is sited with (see XamlOM.WinUI.idl); this header is the framework-internal side.
 struct IPALUri;
 struct IPALResource;
 struct IInspectable;
 
 namespace XamlHotReloadOverrides
 {
-    // Registers, replaces, or (when filePath is null or empty) removes an override.
-    _Check_return_ HRESULT SetOverride(_In_z_ const WCHAR* uri, _In_opt_z_ const WCHAR* filePath);
+    enum class OverrideKind : std::uint8_t { None = 0, Text = 1, Binary = 2 };
 
-    void ClearAll();
+    // Bumped whenever replaced markup changes. Each UI thread's caches remember the value they last saw and refresh
+    // themselves on their next use, so no thread ever touches another thread's caches. Inline (not in the registry)
+    // so the parser, which also ships in binaries without the registry (GenXbf), can read it without linking it.
+    inline std::atomic<std::uint32_t> g_markupGeneration{ 0 };
 
-    // Sets *ppResource to a resource backed by the override file, or to nullptr
-    // when no override is registered for pUri.
+    // Bumped when types become available after startup; parser "type not found" caches compare against it.
+    inline std::atomic<std::uint32_t> g_typeGeneration{ 0 };
+
+    // Set the first time markup is replaced. Same link-free reasoning as above.
+    using KindProbe = OverrideKind (*)(const WCHAR* uri, size_t count);
+    inline std::atomic<KindProbe> g_kindProbe{ nullptr };
+
+    inline OverrideKind ProbeKind(const WCHAR* uri, size_t count)
+    {
+        auto probe = g_kindProbe.load();
+        return probe ? probe(uri, count) : OverrideKind::None;
+    }
+
+    // Sets *ppResource to a resource holding the replaced markup for pUri, or nullptr when it has none.
     _Check_return_ HRESULT TryGetOverrideResource(_In_ IPALUri* pUri, _Outptr_result_maybenull_ IPALResource** ppResource);
 
-    // True when uri (case-insensitive canonical form) is overridden with TEXT markup (a .xaml file). The
-    // compiled .xbf lookup for that URI must then be skipped so the text is parsed instead.
-    bool HasTextOverride(_In_reads_(count) const WCHAR* uri, size_t count);
+    // IXamlHotReloadService (XamlDiagnostics) entry points. *reason receives why a URI was refused.
+    _Check_return_ HRESULT SetMarkup(
+        _In_z_ const WCHAR* uri,
+        OverrideKind kind,
+        _In_reads_(size) const BYTE* content,
+        UINT32 size,
+        _Outptr_result_maybenull_z_ const WCHAR** reason);
+    _Check_return_ HRESULT RemoveMarkup(_In_opt_z_ const WCHAR* uri);
 
-    // Link-free hook for code (the parser) that also ships in binaries without this registry (GenXbf).
-    // Set the first time an override is registered.
-    using TextOverrideProbe = bool (*)(const WCHAR* uri, size_t count);
-    inline std::atomic<TextOverrideProbe> g_textOverrideProbe{ nullptr };
+    // Called by Application.LoadComponent after each successful load (implemented with the service).
+    void InvokeLoadCallbacks(_In_ IInspectable* component, _In_z_ const WCHAR* uri);
 
-    // Called after every successful Application.LoadComponent while registered, so a hot reload agent can
-    // finish wiring a component built from override markup (fields, event handlers, bindings).
-    typedef void (WINAPI *LoadCallback)(_In_ IInspectable* component, _In_z_ const WCHAR* uri, _In_opt_ void* context);
-    void SetLoadCallback(_In_opt_ LoadCallback callback, _In_opt_ void* context);
-    void InvokeLoadCallback(_In_ IInspectable* component, _In_z_ const WCHAR* uri);
-
-    // Forgets cached default styles of app and library types so their themes/generic.xaml is looked up
-    // again (implemented in the framework's DefaultStyles.cpp). Call on the UI thread.
-    void ClearCustomDefaultStyles();
+    // True when the app was built with the hot reload stamp. Computed once.
+    bool IsEnabledForApp();
 }

@@ -84,6 +84,18 @@ void XamlNodeStreamCacheManager::Flush()
     m_UriToXbfResourceMap.clear();
 }
 
+// Hot reload: once replaced markup changes (any thread), this thread's cached lookups and node lists are dropped on
+// its next use. Compiled .xbf files don't change while the app runs, so their mappings and readers stay cached.
+void XamlNodeStreamCacheManager::SyncHotReloadGeneration()
+{
+    const std::uint32_t generation = XamlHotReloadOverrides::g_markupGeneration.load(std::memory_order_relaxed);
+    if (generation != m_hotReloadGeneration)
+    {
+        m_hotReloadGeneration = generation;
+        Flush();
+    }
+}
+
 // Clears the XBFv2 reader cache. This is distinct from Flush()
 // because we only want to do this if metadata was reset (which leads
 // to our cached readers holding onto stale type information).
@@ -134,10 +146,11 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
 
     spXbfResourceOut = nullptr;
 
-    // A hot reload override with TEXT markup replaces the compiled .xbf entirely: report no binary
-    // resource (and cache nothing) so the caller parses the overriding .xaml text instead.
-    if (auto probe = XamlHotReloadOverrides::g_textOverrideProbe.load();
-        probe && probe(strUri.GetBuffer(), strUri.GetCount()))
+    SyncHotReloadGeneration();
+
+    // Hot reload: replaced TEXT markup makes the caller parse it instead of any .xbf.
+    const auto overrideKind = XamlHotReloadOverrides::ProbeKind(strUri.GetBuffer(), strUri.GetCount());
+    if (overrideKind == XamlHotReloadOverrides::OverrideKind::Text)
     {
         return S_OK;
     }
@@ -154,12 +167,20 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
                 uiDotExtensionIndex = strUri.GetCount();
             }
 
-            XStringBuilder xbfUriBuilder;
+            if (overrideKind == XamlHotReloadOverrides::OverrideKind::Binary)
+            {
+                // Hot reload: compiled markup replaced under the .xaml URI itself.
+                IFC_RETURN(CWinUriFactory::Create(strUri.GetCount(), strUri.GetBuffer(), pXbfUri.ReleaseAndGetAddressOf()));
+            }
+            else
+            {
+                XStringBuilder xbfUriBuilder;
 
-            IFC_RETURN(xbfUriBuilder.Initialize(uiDotExtensionIndex + SZ_COUNT(FILE_EXTENSION_XBF)));
-            IFC_RETURN(xbfUriBuilder.Append(strUri.GetBuffer(), uiDotExtensionIndex));
-            IFC_RETURN(xbfUriBuilder.Append(STR_LEN_PAIR(FILE_EXTENSION_XBF)));
-            IFC_RETURN(CWinUriFactory::Create(xbfUriBuilder.GetCount(), xbfUriBuilder.GetBuffer(), pXbfUri.ReleaseAndGetAddressOf()));
+                IFC_RETURN(xbfUriBuilder.Initialize(uiDotExtensionIndex + SZ_COUNT(FILE_EXTENSION_XBF)));
+                IFC_RETURN(xbfUriBuilder.Append(strUri.GetBuffer(), uiDotExtensionIndex));
+                IFC_RETURN(xbfUriBuilder.Append(STR_LEN_PAIR(FILE_EXTENSION_XBF)));
+                IFC_RETURN(CWinUriFactory::Create(xbfUriBuilder.GetCount(), xbfUriBuilder.GetBuffer(), pXbfUri.ReleaseAndGetAddressOf()));
+            }
 
             // Limit XBF lookup only for ms-resource and ms-appx schemes
             IFC_RETURN(UriXStringGetters::GetScheme(pXbfUri, &strScheme));
@@ -189,12 +210,17 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
                 spXbfResource.reset();
                 spXbfResource = itExistingResource->second;
             }
+            else if (XamlHotReloadOverrides::ProbeKind(strPhysicalUri.GetBuffer(), strPhysicalUri.GetCount()) != XamlHotReloadOverrides::OverrideKind::None)
+            {
+                // Hot reload: replaced markup is new content each time, so it is never reused from storage.
+                m_UriToXbfResourceMap.insert({ strPhysicalUri, spXbfResource });
+                isNewResource = true;
+            }
             else
             {
-                // A resource for the same FILE created before a Flush() is reused rather than mapping the
-                // file again (each mapping is held until shutdown). Keyed by file path, not URI: a hot reload
-                // override can point the same URI at a different file. Resources without a file (embedded in a
-                // .pri) can't change while the app runs, so their physical URI identifies them.
+                // A resource for the same file created before a Flush() is reused rather than mapping the file
+                // again (each mapping is held until shutdown). Resources without a file (embedded in a .pri) can't
+                // change while the app runs, so their physical URI identifies them.
                 xstring_ptr strStorageKey;
                 if (FAILED(spXbfResource->TryGetFilePath(&strStorageKey)) || strStorageKey.IsNullOrEmpty())
                 {
@@ -490,6 +516,8 @@ XamlNodeStreamCacheManager::EnsureCacheEntry(
     _In_ const xstring_ptr& spUniqueName,
     std::shared_ptr<NodeStreamCacheEntry>& spNodeStreamCacheEntry)
 {
+    SyncHotReloadGeneration();
+
     auto itNodeStreamCacheEntry = m_UriToNodelistMap.find(spUniqueName);
     if (itNodeStreamCacheEntry == m_UriToNodelistMap.end())
     {
