@@ -65,6 +65,9 @@ public:
 
     void Flush();
 
+    // Flushes when hot reload replaced markup since this cache was filled.
+    void SyncHotReloadGeneration();
+
     // Clears the XBFv2 reader cache. This is distinct from Flush()
     // because we only want to do this if metadata was reset (which leads
     // to our cached readers holding onto stale type information).
@@ -126,6 +129,9 @@ private:
     containers::vector_map<const void*, std::shared_ptr<XamlBinaryFormatReader2>> m_XBFv2ReaderCache;
     std::vector<std::shared_ptr<XamlBinaryFormatReader2>> m_staleXBFv2Readers;
     std::vector<xref_ptr<IPALResource>> m_XbfResourceStorage;
+
+    // The hot reload markup generation this cache was filled under (see XamlHotReloadOverrides.h).
+    std::uint32_t m_hotReloadGeneration = 0;
 
     // Resources in long term storage by the file they map, kept across Flush() so a reload of the same file
     // after a flush reuses its existing mapping (and XBFv2 reader) instead of mapping the file again.
