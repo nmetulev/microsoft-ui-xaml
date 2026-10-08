@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #include "precomp.h"
+#include <XamlHotReloadOverrides.h>
 #include "xamlxmlnamespace.h"
 
 _Check_return_ HRESULT 
@@ -79,6 +80,14 @@ XamlXmlNamespace::GetXamlTypeImpl(
     auto itXamlType = m_mapNameToXamlType.find(inTypeName);
     if (itXamlType == m_mapNameToXamlType.end())
     {
+        // Hot reload: types may have become available since these misses were recorded.
+        const std::uint32_t typeGeneration = XamlHotReloadOverrides::g_typeGeneration.load(std::memory_order_relaxed);
+        if (typeGeneration != m_knownNotFoundTypeGeneration)
+        {
+            m_knownNotFoundTypeGeneration = typeGeneration;
+            m_mapKnownNotFoundTypes.clear();
+        }
+
         if (m_mapKnownNotFoundTypes.find(inTypeName) == m_mapKnownNotFoundTypes.end())
         {
             for (auto typeNamespace : m_typeNamespaceList)

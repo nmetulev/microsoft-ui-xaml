@@ -1,4 +1,4 @@
-﻿<!--
+<!--
 ***********************************************************************************************
 WARNING:  DO NOT MODIFY this file unless you are knowledgeable about MSBuild and have
           created a backup copy.  Incorrect changes to this file will make it
@@ -80,6 +80,12 @@ Licensed under the MIT License. See LICENSE in the project root for license info
         <EnabledXamlOptionalChanges Condition="'$(EnabledXamlOptionalChanges)' == ''"></EnabledXamlOptionalChanges>
         <DisabledXamlOptionalChanges Condition="'$(DisabledXamlOptionalChanges)' == ''"></DisabledXamlOptionalChanges>
         <EnableHotReloadStableConnectionIds Condition="'$(EnableHotReloadStableConnectionIds)' == ''">false</EnableHotReloadStableConnectionIds>
+
+        <!-- XAML hot reload (replacing an app's markup while it runs, through the XAML diagnostics interface) is only
+             allowed in apps carrying the hot reload stamp. Debug builds get it by default; set EnableXamlHotReload to
+             override either way. -->
+        <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == '' AND '$(Configuration)' == 'Debug'">true</EnableXamlHotReload>
+        <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == ''">false</EnableXamlHotReload>
 
         <!-- Determine whether we are building for Win32 or UWP, while respecting any overrides..-->
 
@@ -1203,5 +1209,34 @@ Licensed under the MIT License. See LICENSE in the project root for license info
 
 
     <Import Project="ImportAfter\*"/>
+
+    <!-- Writes the XAML hot reload stamp into the app's output (and so its package root) when hot reload is allowed.
+         Microsoft.UI.Xaml looks for this file before honoring any hot reload request. Only applications get it. -->
+    <PropertyGroup>
+        <_XamlHotReloadStampName>Microsoft.UI.Xaml.HotReload.enabled</_XamlHotReloadStampName>
+        <_XamlHotReloadIsApplication Condition="'$(OutputType)' == 'WinExe' OR '$(OutputType)' == 'Exe' OR '$(OutputType)' == 'AppContainerExe' OR '$(ConfigurationType)' == 'Application'">true</_XamlHotReloadIsApplication>
+    </PropertyGroup>
+
+    <Target Name="_AddXamlHotReloadStamp"
+            BeforeTargets="AssignTargetPaths"
+            Condition="'$(EnableXamlHotReload)' == 'true' AND '$(_XamlHotReloadIsApplication)' == 'true'">
+        <WriteLinesToFile File="$(IntermediateOutputPath)$(_XamlHotReloadStampName)"
+                          Lines="XAML hot reload is allowed for this build (EnableXamlHotReload=true). Builds without it don't carry this file."
+                          Overwrite="true"
+                          WriteOnlyWhenDifferent="true" />
+        <ItemGroup>
+            <Content Include="$(IntermediateOutputPath)$(_XamlHotReloadStampName)"
+                     Link="$(_XamlHotReloadStampName)"
+                     CopyToOutputDirectory="PreserveNewest" />
+            <FileWrites Include="$(IntermediateOutputPath)$(_XamlHotReloadStampName)" />
+        </ItemGroup>
+    </Target>
+
+    <!-- A stamp left in the output by an earlier build that allowed hot reload must not outlive the setting. -->
+    <Target Name="_RemoveStaleXamlHotReloadStamp"
+            AfterTargets="CopyFilesToOutputDirectory"
+            Condition="'$(EnableXamlHotReload)' != 'true'">
+        <Delete Files="$(OutDir)$(_XamlHotReloadStampName)" ContinueOnError="true" />
+    </Target>
 
 </Project>

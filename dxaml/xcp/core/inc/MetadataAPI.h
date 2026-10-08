@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 //  Abstract:
@@ -360,7 +360,8 @@ namespace DirectUI
         //
         // Note that this only invalidates the metadata-level cache. The parser keeps its own negative
         // cache per xml namespace (XamlXmlNamespace::m_mapKnownNotFoundTypes); a host that resolves
-        // names through the parser must also call XamlSchemaContext::ClearKnownNotFoundTypeCaches.
+        // names through the parser must also bump XamlHotReloadOverrides::g_typeGeneration, which each parser
+        // thread checks before trusting its cached misses.
         static XamlMetadataCacheInvalidationResult InvalidateUnresolvedTypeCache(
             _In_ const xstring_ptr_view& strTypeFullName);
 

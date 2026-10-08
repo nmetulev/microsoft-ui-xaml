@@ -4,154 +4,186 @@
 #include "precomp.h"
 #include "PalResourceManager.h"
 #include "BasePALResource.h"
-#include "FilePathResource.h"
 #include <XamlHotReloadOverrides.h>
-#include <atomic>
-#include <map>
-#include <mutex>
-#include <string>
-#include <cwctype>
+#include <XamlHotReloadRegistry.h>
+#include <appmodel.h>
 
 namespace
 {
-    std::mutex& OverrideLock()
+    // Intentionally leaked so lookups during process shutdown never touch a destroyed table.
+    XamlHotReload::MarkupTable& Table()
     {
-        static std::mutex lock;
-        return lock;
+        static auto* table = new XamlHotReload::MarkupTable();
+        return *table;
     }
 
-    // Intentionally leaked so lookups during process shutdown never touch a destroyed map.
-    std::map<std::wstring, std::wstring>& OverrideMap()
+    XamlHotReloadOverrides::OverrideKind ToOverrideKind(XamlHotReload::MarkupKind kind)
     {
-        static auto* map = new std::map<std::wstring, std::wstring>();
-        return *map;
+        switch (kind)
+        {
+            case XamlHotReload::MarkupKind::Text: return XamlHotReloadOverrides::OverrideKind::Text;
+            case XamlHotReload::MarkupKind::Binary: return XamlHotReloadOverrides::OverrideKind::Binary;
+            default: return XamlHotReloadOverrides::OverrideKind::None;
+        }
     }
 
-    std::atomic<bool> s_hasOverrides{ false };
-
-    std::wstring NormalizeUri(_In_reads_(count) const WCHAR* uri, size_t count)
+    XamlHotReloadOverrides::OverrideKind ProbeTable(const WCHAR* uri, size_t count)
     {
-        std::wstring key(uri, count);
-        for (auto& ch : key)
+        return uri ? ToOverrideKind(Table().Find(std::wstring_view(uri, count)).Kind) : XamlHotReloadOverrides::OverrideKind::None;
+    }
+
+    // Memory holding replaced markup. Shares the table's copy, so it stays valid after the URI is replaced again.
+    class SharedMarkupMemory final : public IPALMemory
+    {
+    public:
+        explicit SharedMarkupMemory(std::shared_ptr<const std::vector<std::uint8_t>> content)
+            : m_content(std::move(content))
         {
-            ch = static_cast<WCHAR>(std::towlower(ch));
         }
 
-        // Default-style and resource lookups use the ms-resource:///Files/ form of an app or library file;
-        // overrides are registered with the ms-appx:/// form. Treat them as the same file.
-        static const std::wstring msResourceFiles = L"ms-resource:///files/";
-        if (key.compare(0, msResourceFiles.size(), msResourceFiles) == 0)
+        XUINT32 AddRef() const override { return static_cast<XUINT32>(InterlockedIncrement(&m_refs)); }
+        XUINT32 Release() const override
         {
-            key = L"ms-appx:///" + key.substr(msResourceFiles.size());
+            const auto refs = static_cast<XUINT32>(InterlockedDecrement(&m_refs));
+            if (refs == 0)
+            {
+                delete this;
+            }
+            return refs;
         }
-        return key;
+        void* GetAddress() const override { return const_cast<std::uint8_t*>(m_content->data()); }
+        XUINT32 GetSize() const override { return static_cast<XUINT32>(m_content->size()); }
+
+    private:
+        ~SharedMarkupMemory() = default;
+
+        mutable LONG m_refs = 1;
+        std::shared_ptr<const std::vector<std::uint8_t>> m_content;
+    };
+
+    class MarkupResource final : public CBasePALResource
+    {
+    public:
+        MarkupResource(_In_ IPALUri* uri, std::shared_ptr<const std::vector<std::uint8_t>> content)
+            : CBasePALResource(uri)
+            , m_content(std::move(content))
+        {
+        }
+
+        _Check_return_ HRESULT Load(_Outptr_ IPALMemory** ppMemory) override
+        {
+            *ppMemory = new SharedMarkupMemory(m_content);
+            return S_OK;
+        }
+
+        _Check_return_ HRESULT Exists(_Out_ bool* pfExists) override
+        {
+            *pfExists = true;
+            return S_OK;
+        }
+
+    private:
+        std::shared_ptr<const std::vector<std::uint8_t>> m_content;
+    };
+
+    bool ComputeEnabledForApp()
+    {
+        // ms-appx:/// resolves against the package root for a packaged app and the executable's folder otherwise.
+        std::wstring folder;
+        UINT32 length = 0;
+        if (GetCurrentPackagePath(&length, nullptr) == ERROR_INSUFFICIENT_BUFFER)
+        {
+            folder.resize(length);
+            if (GetCurrentPackagePath(&length, folder.data()) != ERROR_SUCCESS)
+            {
+                return false;
+            }
+            folder.resize(wcslen(folder.c_str()));
+        }
+        else
+        {
+            std::wstring module(MAX_PATH, L'\0');
+            for (;;)
+            {
+                const DWORD written = GetModuleFileNameW(nullptr, module.data(), static_cast<DWORD>(module.size()));
+                if (written == 0)
+                {
+                    return false;
+                }
+                if (written < module.size())
+                {
+                    module.resize(written);
+                    break;
+                }
+                module.resize(module.size() * 2);
+            }
+            const auto slash = module.find_last_of(L"\\/");
+            if (slash == std::wstring::npos)
+            {
+                return false;
+            }
+            folder = module.substr(0, slash);
+        }
+
+        const DWORD attributes = GetFileAttributesW(XamlHotReload::StampPath(folder).c_str());
+        return attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_DIRECTORY) == 0;
     }
 }
 
-_Check_return_ HRESULT XamlHotReloadOverrides::SetOverride(_In_z_ const WCHAR* uri, _In_opt_z_ const WCHAR* filePath)
+bool XamlHotReloadOverrides::IsEnabledForApp()
 {
-    if (uri == nullptr || *uri == L'\0')
+    static const bool enabled = ComputeEnabledForApp();
+    return enabled;
+}
+
+_Check_return_ HRESULT XamlHotReloadOverrides::SetMarkup(
+    _In_z_ const WCHAR* uri,
+    OverrideKind kind,
+    _In_reads_(size) const BYTE* content,
+    UINT32 size,
+    _Outptr_result_maybenull_z_ const WCHAR** reason)
+{
+    *reason = nullptr;
+    const auto tableKind = kind == OverrideKind::Text ? XamlHotReload::MarkupKind::Text
+        : kind == OverrideKind::Binary ? XamlHotReload::MarkupKind::Binary
+        : XamlHotReload::MarkupKind::None;
+    if (const wchar_t* refused = Table().Set(uri ? uri : L"", tableKind, content, size))
     {
+        *reason = refused;
         return E_INVALIDARG;
     }
-
-    const std::wstring key = NormalizeUri(uri, wcslen(uri));
-
-    std::lock_guard<std::mutex> guard(OverrideLock());
-    auto& map = OverrideMap();
-    if (filePath == nullptr || *filePath == L'\0')
-    {
-        map.erase(key);
-    }
-    else
-    {
-        map[key] = filePath;
-        g_textOverrideProbe = &XamlHotReloadOverrides::HasTextOverride;
-    }
-    s_hasOverrides = !map.empty();
+    g_kindProbe = &ProbeTable;
+    g_markupGeneration.fetch_add(1);
     return S_OK;
 }
 
-void XamlHotReloadOverrides::ClearAll()
+_Check_return_ HRESULT XamlHotReloadOverrides::RemoveMarkup(_In_opt_z_ const WCHAR* uri)
 {
-    std::lock_guard<std::mutex> guard(OverrideLock());
-    OverrideMap().clear();
-    s_hasOverrides = false;
-}
-
-bool XamlHotReloadOverrides::HasTextOverride(_In_reads_(count) const WCHAR* uri, size_t count)
-{
-    if (!s_hasOverrides || uri == nullptr)
+    if (!Table().Remove(uri ? uri : L""))
     {
-        return false;
+        return E_INVALIDARG;
     }
-
-    const std::wstring key = NormalizeUri(uri, count);
-    std::lock_guard<std::mutex> guard(OverrideLock());
-    auto& map = OverrideMap();
-    auto it = map.find(key);
-    if (it == map.end() || it->second.size() < 5)
-    {
-        return false;
-    }
-
-    const std::wstring& path = it->second;
-    return _wcsicmp(path.c_str() + path.size() - 5, L".xaml") == 0;
-}
-
-namespace
-{
-    std::atomic<XamlHotReloadOverrides::LoadCallback> s_loadCallback{ nullptr };
-    std::atomic<void*> s_loadCallbackContext{ nullptr };
-}
-
-void XamlHotReloadOverrides::SetLoadCallback(_In_opt_ LoadCallback callback, _In_opt_ void* context)
-{
-    s_loadCallbackContext = context;
-    s_loadCallback = callback;
-}
-
-void XamlHotReloadOverrides::InvokeLoadCallback(_In_ IInspectable* component, _In_z_ const WCHAR* uri)
-{
-    if (auto callback = s_loadCallback.load())
-    {
-        callback(component, uri, s_loadCallbackContext.load());
-    }
+    g_markupGeneration.fetch_add(1);
+    return S_OK;
 }
 
 _Check_return_ HRESULT XamlHotReloadOverrides::TryGetOverrideResource(_In_ IPALUri* pUri, _Outptr_result_maybenull_ IPALResource** ppResource)
 {
     *ppResource = nullptr;
 
-    if (!s_hasOverrides || pUri == nullptr)
+    if (g_kindProbe.load() == nullptr || pUri == nullptr)
     {
         return S_OK;
     }
 
     xstring_ptr strCanonical;
     IFC_RETURN(pUri->GetCanonical(&strCanonical));
-    const std::wstring key = NormalizeUri(strCanonical.GetBuffer(), strCanonical.GetCount());
-
-    std::wstring filePath;
+    const auto entry = Table().Find(std::wstring_view(strCanonical.GetBuffer(), strCanonical.GetCount()));
+    if (!entry.Content)
     {
-        std::lock_guard<std::mutex> guard(OverrideLock());
-        auto& map = OverrideMap();
-        auto it = map.find(key);
-        if (it == map.end())
-        {
-            return S_OK;
-        }
-        filePath = it->second;
+        return S_OK;
     }
 
-    xstring_ptr strFilePath;
-    IFC_RETURN(xstring_ptr::CloneBuffer(filePath.c_str(), static_cast<XUINT32>(filePath.size()), &strFilePath));
-    IFC_RETURN(CFilePathResource::Create(pUri, strFilePath, ppResource));
-
-#if DBG
-    WCHAR message[1024];
-    swprintf_s(message, L"XamlHotReload: %s -> %s\n", key.c_str(), filePath.c_str());
-    OutputDebugStringW(message);
-#endif
+    *ppResource = new MarkupResource(pUri, entry.Content);
     return S_OK;
 }

@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #include "precomp.h"
@@ -516,16 +516,6 @@ void StyleCache::ClearCustomStyles()
     m_fLoadedAppStyles = FALSE;
 }
 
-void XamlHotReloadOverrides::ClearCustomDefaultStyles()
-{
-    if (auto core = DXamlCore::GetCurrent())
-    {
-        if (auto defaultStyles = core->GetDefaultStyles())
-        {
-            defaultStyles->GetStyleCache()->ClearCustomStyles();
-        }
-    }
-}
 
 _Check_return_ HRESULT StyleCache::GetStyles(
     _In_z_ const WCHAR* wszNamespace,
@@ -545,6 +535,16 @@ _Check_return_ HRESULT StyleCache::GetStyles(
     // the library name is the assembly name if available, else the namespace
     const WCHAR* wszLibraryName = wszAssemblyName ? wszAssemblyName : wszNamespace;
     xstring_ptr strStyleCacheKey;
+
+    // Hot reload: app and library generic.xaml may resolve to replaced markup now.
+    {
+        const std::uint32_t generation = XamlHotReloadOverrides::g_markupGeneration.load(std::memory_order_relaxed);
+        if (generation != m_hotReloadGeneration)
+        {
+            m_hotReloadGeneration = generation;
+            ClearCustomStyles();
+        }
+    }
 
     // create the cache key for this control's style
     if (!pUri)
