@@ -82,9 +82,10 @@ Licensed under the MIT License. See LICENSE in the project root for license info
         <EnableHotReloadStableConnectionIds Condition="'$(EnableHotReloadStableConnectionIds)' == ''">false</EnableHotReloadStableConnectionIds>
 
         <!-- XAML hot reload (replacing an app's markup while it runs, through the XAML diagnostics interface) is only
-             allowed in apps carrying the hot reload stamp. Debug builds get it by default; set EnableXamlHotReload to
-             override either way. -->
-        <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == '' AND '$(Configuration)' == 'Debug'">true</EnableXamlHotReload>
+             allowed in apps carrying the hot reload stamp. Debug builds get it by default: the Debug configuration, or
+             any configuration that turns optimization off (.NET) or uses the debug runtime libraries (C++). Set
+             EnableXamlHotReload to override either way. -->
+        <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == '' AND ('$(Configuration)' == 'Debug' OR '$(Optimize)' == 'false' OR '$(UseDebugLibraries)' == 'true')">true</EnableXamlHotReload>
         <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == ''">false</EnableXamlHotReload>
 
         <!-- Determine whether we are building for Win32 or UWP, while respecting any overrides..-->
