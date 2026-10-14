@@ -498,7 +498,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
                 else
                 {
                     var idx = sequence - 1;
-                    Debug.Assert(idx < numParams, "Parameter sequence number exceeds method signature parameter count");
+                    Debug.Assert(idx < numParams, "Parameter sequence number exceeds method signature parameter count: " + this.DeclaringType?.FullName + "." + this.Name + " in " + this.Module?.FullyQualifiedName);
                     if (idx < numParams)
                     {
                         parameters[idx] = new MetadataOnlyParameterInfo(

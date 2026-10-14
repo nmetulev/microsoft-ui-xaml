@@ -29,9 +29,18 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public SavedStateManager SavedState { get; private set; }
         public List<TaskItemFilename> ClasslessXamlFiles { get; private set; }
         public string GeneratedFileExtension { get; private set; }
+        public bool IsServiceCompile { get { return _serviceRequest != null; } }
+        private readonly ISet<string> _serviceRequest;
+
+        public bool IsInServiceRequest(string sourceXamlFullPath)
+        {
+            return _serviceRequest != null && _serviceRequest.Contains(sourceXamlFullPath);
+        }
+
         public SourceFileManager(CompileXamlInternal compiler)
         {
             IsPass1 = compiler.IsPass1;
+            _serviceRequest = compiler.ServiceXamlFilesToCompile;
             SavedState = compiler.SaveState;
             XbfGenerationIsDisabled = compiler.DisableXbfGeneration;
             ProjectFolderFullpath = compiler.ProjectFolderFullpath;
@@ -78,7 +87,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             this.SavedState.Save();
         }
 
-        private void PrepareToSaveState()
+        internal void PrepareToSaveState()
         {
             if (_classXamlFilesMap != null)
             {
@@ -159,7 +168,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         foreach (TaskItemFilename tif in xamlTaskItems)
                         {
                             tif.IsForcedOutOfDate = true;
-                            if (File.Exists(tif.XamlOutputFilename))
+                            // The compiler service regenerates exactly what it was asked for and needs no
+                            // timestamp-forcing deletes (a pass 1 on its own must not lose pass 2 output).
+                            if (!tif.ServiceOutOfDate.HasValue && File.Exists(tif.XamlOutputFilename))
                             {
                                 // delete the output file so we will be sure to rebuild it in Pass2. Timestamps are insufficient since multiple files per class are involved.
                                 File.Delete(tif.XamlOutputFilename);
@@ -261,7 +272,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private TaskItemFilename LoadTaskItem(List<TaskItemFilename> tifList, IFileItem item, bool isApplication, bool isSdkXaml)
         {
             TaskItemFilename tif = new TaskItemFilename(item, this, isApplication, isSdkXaml);
-            tif.XamlLastChangeTime = GetSourceFileChanged(tif);
+            if (!IsServiceCompile || IsInServiceRequest(tif.SourceXamlFullPath))
+            {
+                tif.XamlLastChangeTime = GetSourceFileChanged(tif);
+            }
             SavedState.LoadSavedTaskItemInfo(tif);
             this.RegisterClassOfTaskItem(tif);
             tifList.Add(tif);

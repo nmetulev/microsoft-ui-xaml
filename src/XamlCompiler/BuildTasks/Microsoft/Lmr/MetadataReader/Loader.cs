@@ -119,14 +119,24 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         /// </summary>
         public Assembly LoadAssemblyFromByteArray(byte[] data)
         {
+            Assembly assembly = ReadAssemblyFromByteArray(data, String.Empty);
+            m_universe.AddAssembly(assembly);
+            return assembly;
+        }
+
+        /// <summary>
+        /// Read an assembly from an in-memory PE image without adding it to the universe.
+        /// <paramref name="location"/> is reported as Assembly.Location so callers can treat the
+        /// image as a stand-in for a file on disk (for example, a freshly emitted compilation).
+        /// </summary>
+        public Assembly ReadAssemblyFromByteArray(byte[] data, string location)
+        {
             Debug.Assert(data != null);
 
             var peReader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(data));
             var reader = peReader.GetMetadataReader(ReaderOptions);
 
-            Assembly assembly = AssemblyFactory.CreateAssembly(m_universe, peReader, reader, this.Factory, String.Empty);
-            m_universe.AddAssembly(assembly);
-            return assembly;
+            return AssemblyFactory.CreateAssembly(m_universe, peReader, reader, this.Factory, location ?? String.Empty);
         }
 
 
