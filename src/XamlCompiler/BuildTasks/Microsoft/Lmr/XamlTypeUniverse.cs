@@ -263,6 +263,21 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
                     // It isn't exactly right in the C++ case either but the differences are mitigated.
                     Assembly runtimeAssembly = typeof(int).Assembly;
                     path = runtimeAssembly.Location;
+#if NETCOREAPP
+                    // On .NET the core library is System.Private.CoreLib, not mscorlib, and nothing in a
+                    // native project's references resolves "mscorlib". Use the .NET Framework mscorlib that
+                    // the .NET Framework compiler would be running on, so both hosts see the same types.
+                    string frameworkMscorlib = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                        "Microsoft.NET",
+                        Environment.Is64BitProcess ? "Framework64" : "Framework",
+                        "v4.0.30319",
+                        "mscorlib.dll");
+                    if (File.Exists(frameworkMscorlib))
+                    {
+                        path = frameworkMscorlib;
+                    }
+#endif
                 }
                 try
                 {
