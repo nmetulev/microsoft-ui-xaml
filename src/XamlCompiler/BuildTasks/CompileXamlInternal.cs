@@ -994,6 +994,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 s_typeUniverse = new XamlTypeUniverse(Language.IsManaged);
                 s_typeUniverse.ProjectPath = this.ProjectPath;
                 s_typeUniverse.ReferenceAssemblyPaths = this.ReferenceAssemblyPaths;
+                // The service's universe lives across builds; it must not hold the project's files open.
+                s_typeUniverse.PrefetchFiles = IsServiceCompile;
 
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_CreatedTypeUniverse);
             }

@@ -36,6 +36,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         public string ProjectPath { get; set; }
         public String[] ReferenceAssemblyPaths { get; set; }
 
+        /// <summary>
+        /// Read assembly files completely on load so none stays open (for long-lived hosts).
+        /// </summary>
+        public bool PrefetchFiles
+        {
+            get { return _loader.PrefetchFiles; }
+            set { _loader.PrefetchFiles = value; }
+        }
+
         public bool IsSystemAssemblyLoaded { get { return _systemAssembly != null; } }
 
         private Loader Loader { get { return _loader; } }

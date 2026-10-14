@@ -191,6 +191,34 @@ internal static class Program
         }
 
         Console.WriteLine($"process total {processClock.Elapsed.TotalMilliseconds:F0} ms, working set {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB");
+
+        // Can a build overwrite the project's assembly and references while the service is alive?
+        if (args.Contains("--check-locks"))
+        {
+            var files = new List<string> { asmPath };
+            files.AddRange(inputs.ReferenceAssemblies.Select(r => Path.GetFullPath(Path.Combine(projectDir, r.ItemSpec))));
+            int locked = 0;
+            foreach (string file in files.Where(File.Exists))
+            {
+                try
+                {
+                    using (File.Open(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+                }
+                catch (IOException)
+                {
+                    locked++;
+                    if (locked <= 3)
+                    {
+                        Console.WriteLine($"    locked: {file}");
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Read-only files (for example in Program Files) can't be opened for write by anyone.
+                }
+            }
+            Console.WriteLine($"lock check: {locked} of {files.Count} files held open by the service");
+        }
         try { Directory.Delete(tempDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
         return 0;
     }
