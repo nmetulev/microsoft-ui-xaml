@@ -44,6 +44,7 @@ internal static class Program
             case "prepare": return Prepare(args[1], args[2], args[3]);
             case "bench": return Bench(args.Skip(1).ToArray());
             case "emit": return Emit(args.Skip(1).ToArray());
+            case "edit": return EditScenario(args.Skip(1).ToArray());
             default:
                 Console.WriteLine($"unknown command {args[0]}");
                 return 1;
@@ -167,6 +168,26 @@ internal static class Program
                 Report($"[{n}] pass1 {page}", service.CompilePass1(new[] { page }));
                 Report($"[{n}] pass2 {page}", RunPass2(new[] { page }, regenerateTypeInfo));
             }
+        }
+
+        // Every page in the project, one at a time (pass 1 + pass 2): the distribution a user would see.
+        if (args.Contains("--each-page"))
+        {
+            var totals = new List<(double Ms, string Page)>();
+            int failures = 0;
+            foreach (string page in service.AllXamlFiles)
+            {
+                XamlCompileResult p1 = service.CompilePass1(new[] { page });
+                XamlCompileResult p2 = RunPass2(new[] { page }, regenerateTypeInfo);
+                if (!p1.Success || !p2.Success)
+                {
+                    failures++;
+                }
+                totals.Add((p1.Elapsed.TotalMilliseconds + p2.Elapsed.TotalMilliseconds, Path.GetRelativePath(Path.GetDirectoryName(inputs.ProjectPath), page)));
+            }
+            totals.Sort((a, b) => a.Ms.CompareTo(b.Ms));
+            double P(double q) => totals[(int)Math.Min(totals.Count - 1, Math.Round(q * (totals.Count - 1)))].Ms;
+            Console.WriteLine($"each page (pass1 + pass2), {totals.Count} pages, failures={failures}: min={totals[0].Ms:F0} p50={P(0.5):F0} p90={P(0.9):F0} p99={P(0.99):F0} max={totals[^1].Ms:F0} ms; slowest: {string.Join(", ", totals.Skip(totals.Count - 3).Select(t => $"{t.Page} {t.Ms:F0}"))}");
         }
 
         Console.WriteLine($"process total {processClock.Elapsed.TotalMilliseconds:F0} ms, working set {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB");
@@ -306,7 +327,10 @@ internal static class Program
                 .SelectMany(a => a.GetGenerators(LanguageNames.CSharp))
                 .ToList();
             var optionsProvider = new SimpleConfigOptionsProvider(parsed, projectDir);
-            GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, parseOptions: parsed.ParseOptions, optionsProvider: optionsProvider);
+            var additionalTexts = parsed.AdditionalFiles
+                .Select(f => (AdditionalText)new FileAdditionalText(Path.GetFullPath(Path.Combine(projectDir, f.Path))))
+                .ToImmutableArray();
+            GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, additionalTexts, parsed.ParseOptions, optionsProvider);
             driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out Compilation updated, out ImmutableArray<Diagnostic> genDiags);
             compilation = (CSharpCompilation)updated;
             Console.WriteLine($"generators ({generators.Count}): {w.Elapsed.TotalMilliseconds:F0} ms, diagnostics={genDiags.Length}");
@@ -348,6 +372,187 @@ internal static class Program
         }
         Console.WriteLine($"metadata-only emit after editing one generated file: {w.Elapsed.TotalMilliseconds:F0} ms");
         return 0;
+    }
+
+    // The per-save path end to end, in one warm process:
+    //   edit <build input.json> <outputPath> <rsp> <page.xaml> <find> <replace> <resultDir> [--rounds N]
+    // Warms the service and a Roslyn compilation of the app (from the build's csc arguments, with
+    // generators), then applies the edit to the XAML file and runs: pass 1 for the page, Roslyn
+    // metadata-only emit with the new .g.i.cs, pass 2 with that image, and pass 2 with the image from
+    // before the edit. Writes both pass 2 results under <resultDir> for diffing, then restores the file.
+    private static int EditScenario(string[] args)
+    {
+        string buildInputJson = args[0], outputPath = args[1], rspPath = args[2], page = args[3];
+        string find = args[4], replace = args[5], resultDir = args[6];
+        int rounds = int.Parse(Option(args, "--rounds", "3"));
+        CompilerInputs inputs = ReadInputs(buildInputJson);
+        string projectDir = Path.GetDirectoryName(inputs.ProjectPath);
+        string pagePath = Path.GetFullPath(Path.Combine(projectDir, page));
+        string original = File.ReadAllText(pagePath);
+        if (!original.Contains(find, StringComparison.Ordinal))
+        {
+            Console.WriteLine("edit anchor not found");
+            return 1;
+        }
+        string edited = original.Replace(find, replace, StringComparison.Ordinal);
+
+        // Optional code-behind edit applied together with the XAML edit.
+        string csPath = Option(args, "--cs") is string cs ? Path.GetFullPath(Path.Combine(projectDir, cs)) : null;
+        string csOriginal = csPath != null ? File.ReadAllText(csPath) : null;
+        string csEdited = csPath != null ? csOriginal.Replace(Option(args, "--cs-find"), Option(args, "--cs-replace"), StringComparison.Ordinal) : null;
+        if (csPath != null && csEdited == csOriginal)
+        {
+            Console.WriteLine("code-behind anchor not found");
+            return 1;
+        }
+
+        using var service = new XamlCompilerService(inputs, outputPath);
+        string serviceOutput = Path.GetFullPath(Path.Combine(projectDir, outputPath));
+        string buildOutput = Path.GetFullPath(Path.Combine(projectDir, inputs.OutputPath));
+
+        Stopwatch w = Stopwatch.StartNew();
+        IReadOnlyList<string> all = service.AllXamlFiles;
+        XamlCompileResult warm1 = service.CompilePass1(all);
+        XamlCompileResult warm2 = service.CompilePass2(all);
+        Console.WriteLine($"service warm-up (full pass 1 + pass 2): {w.ElapsedMilliseconds} ms ok={warm1.Success && warm2.Success}");
+
+        // The app's compilation, as a hot reload host would hold it: generated files come from the
+        // service's output folder.
+        w.Restart();
+        CSharpCompilation compilation = CreateCompilation(rspPath, projectDir, buildOutput + "\\", serviceOutput + "\\");
+        using (var m = new MemoryStream())
+        {
+            compilation.Emit(m, options: new EmitOptions(metadataOnly: true, includePrivateMembers: true));
+        }
+        Console.WriteLine($"roslyn warm-up (parse, generators, first metadata emit): {w.ElapsedMilliseconds} ms");
+        byte[] imageBeforeEdit = EmitMetadata(compilation, out _);
+
+        try
+        {
+            for (int round = 0; round < rounds; round++)
+            {
+                // Alternate edited/original so every round is a real change.
+                bool applyEdit = round % 2 == 0;
+                File.WriteAllText(pagePath, applyEdit ? edited : original);
+                Console.WriteLine($"--- round {round}: {(applyEdit ? "apply edit" : "revert edit")}");
+
+                Stopwatch total = Stopwatch.StartNew();
+                XamlCompileResult p1 = service.CompilePass1(new[] { page });
+                Report("  pass1", p1);
+
+                w.Restart();
+                var changedSources = new Dictionary<string, string>(p1.GeneratedText, StringComparer.OrdinalIgnoreCase);
+                if (csPath != null)
+                {
+                    File.WriteAllText(csPath, applyEdit ? csEdited : csOriginal);
+                    changedSources[csPath] = applyEdit ? csEdited : csOriginal;
+                }
+                foreach (KeyValuePair<string, string> file in changedSources)
+                {
+                    SyntaxTree old = compilation.SyntaxTrees.FirstOrDefault(t => string.Equals(t.FilePath, file.Key, StringComparison.OrdinalIgnoreCase));
+                    if (old != null)
+                    {
+                        compilation = compilation.ReplaceSyntaxTree(old, old.WithChangedText(Microsoft.CodeAnalysis.Text.SourceText.From(file.Value, System.Text.Encoding.UTF8)));
+                    }
+                }
+                byte[] image = EmitMetadata(compilation, out double emitMs);
+                Console.WriteLine($"  roslyn: update trees + metadata-only emit {w.Elapsed.TotalMilliseconds:F0} ms (emit {emitMs:F0} ms, {image.Length:N0} bytes)");
+
+                XamlCompileResult p2 = service.CompilePass2(new[] { page }, image, regenerateTypeInfo: false);
+                Report("  pass2 (new image)", p2);
+                Console.WriteLine($"  per-save total (pass1 + roslyn metadata emit + pass2): {total.Elapsed.TotalMilliseconds:F0} ms");
+                Save(p2, Path.Combine(resultDir, $"round{round}-new-image"), serviceOutput);
+                if (p2.XamlTypeInfoMayBeStale)
+                {
+                    // The fallback: a full pass 2 that regenerates XamlTypeInfo exactly as a build does.
+                    XamlCompileResult full = service.CompilePass2(service.AllXamlFiles, image, regenerateTypeInfo: true);
+                    Console.WriteLine($"  XamlTypeInfo stale -> full pass2 with type info: {full.Elapsed.TotalMilliseconds:F0} ms ok={full.Success}");
+                }
+
+                // Same pass 2 against the image from before any edit: is a new image needed at all
+                // for XAML-only edits? (Compiled into a scratch run, then the new-image result is restored.)
+                if (!args.Contains("--skip-old-image"))
+                {
+                    XamlCompileResult p2Old = service.CompilePass2(new[] { page }, imageBeforeEdit, regenerateTypeInfo: false);
+                    Report("  pass2 (pre-edit image)", p2Old);
+                    Save(p2Old, Path.Combine(resultDir, $"round{round}-old-image"), serviceOutput);
+                    service.CompilePass2(new[] { page }, image, regenerateTypeInfo: false);
+                }
+                Save(p1, Path.Combine(resultDir, $"round{round}-pass1"), serviceOutput);
+            }
+        }
+        finally
+        {
+            File.WriteAllText(pagePath, rounds % 2 == 1 ? edited : original);
+            if (csPath != null)
+            {
+                File.WriteAllText(csPath, rounds % 2 == 1 ? csEdited : csOriginal);
+            }
+            Console.WriteLine($"left {page} {(rounds % 2 == 1 ? "edited" : "original")}");
+        }
+        return 0;
+    }
+
+    // Copies what the compiler wrote to disk for this compile (exact bytes, as a build would leave them).
+    private static void Save(XamlCompileResult r, string dir, string serviceOutput)
+    {
+        foreach (string file in r.GeneratedText.Keys.Concat(r.GeneratedXbf.Keys))
+        {
+            string target = Path.Combine(dir, Path.GetRelativePath(serviceOutput, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.Copy(file, target, overwrite: true);
+        }
+    }
+
+    private static byte[] EmitMetadata(Compilation compilation, out double milliseconds)
+    {
+        Stopwatch w = Stopwatch.StartNew();
+        using var m = new MemoryStream();
+        EmitResult result = compilation.Emit(m, options: new EmitOptions(metadataOnly: true, includePrivateMembers: true));
+        milliseconds = w.Elapsed.TotalMilliseconds;
+        if (!result.Success)
+        {
+            foreach (Diagnostic d in result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Take(5))
+            {
+                Console.WriteLine("    emit: " + d);
+            }
+        }
+        return m.ToArray();
+    }
+
+    private static CSharpCompilation CreateCompilation(string rspPath, string projectDir, string replaceFrom, string replaceTo)
+    {
+        string rsp = File.ReadAllText(rspPath).Trim().Replace(replaceFrom, replaceTo, StringComparison.OrdinalIgnoreCase);
+        string[] cscArgs = CommandLineParser.SplitCommandLineIntoArguments(rsp, removeHashComments: false).ToArray();
+        CSharpCommandLineArguments parsed = CSharpCommandLineParser.Default.Parse(cscArgs, projectDir, Path.GetDirectoryName(typeof(object).Assembly.Location));
+        var trees = parsed.SourceFiles.AsParallel().AsOrdered()
+            .Select(f => CSharpSyntaxTree.ParseText(
+                Microsoft.CodeAnalysis.Text.SourceText.From(File.Exists(f.Path) ? File.ReadAllText(f.Path) : string.Empty, System.Text.Encoding.UTF8),
+                parsed.ParseOptions, f.Path))
+            .ToList();
+        var references = parsed.MetadataReferences
+            .Select(r => (MetadataReference)MetadataReference.CreateFromFile(Path.GetFullPath(Path.Combine(projectDir, r.Reference))))
+            .ToList();
+        CSharpCompilation compilation = CSharpCompilation.Create(Path.GetFileNameWithoutExtension(parsed.OutputFileName), trees, references, parsed.CompilationOptions);
+        var loader = new SimpleAnalyzerLoader();
+        var generators = parsed.AnalyzerReferences
+            .Select(a => new AnalyzerFileReference(Path.GetFullPath(Path.Combine(projectDir, a.FilePath)), loader))
+            .SelectMany(a => a.GetGenerators(LanguageNames.CSharp))
+            .ToList();
+        var additionalTexts = parsed.AdditionalFiles
+            .Select(f => (AdditionalText)new FileAdditionalText(Path.GetFullPath(Path.Combine(projectDir, f.Path))))
+            .ToImmutableArray();
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(generators, additionalTexts, parsed.ParseOptions, new SimpleConfigOptionsProvider(parsed, projectDir));
+        driver.RunGeneratorsAndUpdateCompilation(compilation, out Compilation updated, out _);
+        return (CSharpCompilation)updated;
+    }
+
+    private sealed class FileAdditionalText : AdditionalText
+    {
+        public FileAdditionalText(string path) => Path = path;
+        public override string Path { get; }
+        public override Microsoft.CodeAnalysis.Text.SourceText GetText(System.Threading.CancellationToken cancellationToken = default) =>
+            Microsoft.CodeAnalysis.Text.SourceText.From(File.ReadAllText(Path), System.Text.Encoding.UTF8);
     }
 
     private sealed class SimpleAnalyzerLoader : IAnalyzerAssemblyLoader
