@@ -210,6 +210,9 @@ Service support (no effect on builds):
   (universe name and type caches, factory type cache, per-assembly and per-module type caches, type
   resolver, attribute cache).
 - `XamlCompilerService`, `XamlCompiler.exe --serve`, `perfXC_Checkpoint` markers.
+- In the service, assembly files are read completely when loaded and not kept open, so a build can
+  overwrite the project's intermediate assembly and its references while the service is alive.
+  A build still reads them lazily, as before.
 - `Tools/XamlCompilerServiceHost`: benchmarks, the Roslyn emit and the edit scenarios used above.
 
 Fixes that matter for builds too:
