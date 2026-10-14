@@ -87,7 +87,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
 
     public static class TypeForCodeGenExtensionMethods
     {
-        static Dictionary<XamlType, TypeForCodeGen> cache = new Dictionary<XamlType, TypeForCodeGen>();
+        // Cleared after every compile (InstanceCacheManager.ClearCache) so no XamlType or Type from an
+        // earlier compile, possibly of an older build of the project's assembly, is ever handed back.
+        static Dictionary<XamlType, TypeForCodeGen> cache = new Core.InstanceCache<XamlType, TypeForCodeGen>();
 
         private static TypeForCodeGen GetTypeForCodeGen(this XamlType type)
         {

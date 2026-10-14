@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. See LICENSE in the project root for license information. -->
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
@@ -72,6 +72,7 @@
     <Compile Include="PropertyStep.cs" />
     <Compile Include="RootFieldStep.cs" />
     <Compile Include="RootStep.cs" />
+    <Compile Include="StableStringHash.cs" />
     <Compile Include="StaticRootStep.cs" />
     <Compile Include="BindPathStep.cs" />
     <Compile Include="BindPathStepResolver.cs" />

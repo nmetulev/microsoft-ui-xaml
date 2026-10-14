@@ -44,6 +44,39 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
             this.AddWinmdAssembly(localAssembly, true);
         }
 
+        /// <summary>
+        /// Forget every type that came from <paramref name="assembly"/>, so a newer build of it can be added.
+        /// </summary>
+        public void RemoveAssemblyFromTypeNameMap(Assembly assembly)
+        {
+            string assemblyName = assembly.ToString();
+            knownAssemblies.Remove(assemblyName);
+
+            string suffix = ", " + assemblyName;
+            RemoveEntriesFromAssembly(this.fullNameToAsmQName, suffix);
+            RemoveEntriesFromAssembly(this.directUiToAsmQName, suffix);
+        }
+
+        private static void RemoveEntriesFromAssembly(Dictionary<string, string> map, string assemblyQualifiedSuffix)
+        {
+            if (map == null)
+            {
+                return;
+            }
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, string> entry in map)
+            {
+                if (entry.Value.EndsWith(assemblyQualifiedSuffix, StringComparison.Ordinal))
+                {
+                    stale.Add(entry.Key);
+                }
+            }
+            foreach (string key in stale)
+            {
+                map.Remove(key);
+            }
+        }
+
         public Type GetTypeByFullName(string fullName)
         {
             string qName;

@@ -6,6 +6,7 @@ namespace XAMLCompiler.BuildTasks.Core {
     export const core: SourceFile[] = [
         f`ClassCodeGenFile.cs`,
         f`CompileXamlInternal.cs`,
+        f`XamlCompilerService.cs`,
         f`ExperimentalFeatures.cs`,
         f`Helpers.cs`,
         f`Item.cs`,

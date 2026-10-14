@@ -56,6 +56,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private static XamlTypeUniverse s_typeUniverse;
         private static TypeResolver s_typeResolver;
 
+        // The project's own assembly as last loaded by the compiler service. The service keeps the
+        // type universe alive between compiles and replaces only this assembly on each request.
+        private static Assembly s_serviceLocalAssembly;
+
         private Dictionary<String, XamlClassCodeInfo> _classCodeInfos = new Dictionary<string, XamlClassCodeInfo>();
 
         private List<String> _suppressedWarnings = new List<string>();
@@ -184,6 +188,47 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public bool EnableHotReloadStableConnectionIds { get; set; }
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
+
+        #endregion
+
+        #region Compiler service inputs
+
+        // Set by XamlCompilerService. When non-null, only these XAML files (full paths) are compiled,
+        // regardless of timestamps, saved state or assembly fingerprints. Null means a normal build.
+        internal ISet<string> ServiceXamlFilesToCompile { get; set; }
+
+        // Pass 2 only. True: read every page for type info and regenerate XamlTypeInfo, as a build does.
+        // False: read only the requested pages and skip XamlTypeInfo (callers must know it is unchanged).
+        internal bool ServiceCollectAllTypeInfo { get; set; } = true;
+
+        // Pass 2 only. The project's assembly as an in-memory PE image (for example a Roslyn emit),
+        // used instead of reading LocalAssembly from disk. LocalAssembly still supplies its location.
+        internal byte[] ServiceLocalAssemblyImage { get; set; }
+
+        // Receives every generated text file (full path -> contents) as it is written.
+        internal IDictionary<string, string> ServiceWrittenFiles { get; set; }
+
+        internal bool IsServiceCompile => ServiceXamlFilesToCompile != null;
+
+        // Pass 2 only: the types and user-type members collected for XamlTypeInfo, as "Type" and
+        // "Type.Member" names. Lets the service tell whether a page edit needs XamlTypeInfo regenerated.
+        internal HashSet<string> GetCollectedTypeInfoKeys()
+        {
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            if (_typeInfoCollector == null)
+            {
+                return keys;
+            }
+            foreach (InternalTypeEntry type in _typeInfoCollector.SchemaInfo.TypeTable)
+            {
+                keys.Add(type.StandardName);
+            }
+            foreach (InternalXamlUserMemberInfo member in _typeInfoCollector.SchemaInfo.UserMemberInfo)
+            {
+                keys.Add(member.DeclaringType.StandardName + "." + member.Name);
+            }
+            return keys;
+        }
 
         #endregion
 
@@ -722,13 +767,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         internal void UpdateGeneratedFilesLists()
         {
+            // These lists tell MSBuild about every generated file. A service compile reports only what it compiled.
             foreach (ClassCodeGenFile codeGenFile in SourceFileManager.CodeGenFiles)
             {
+                if (IsServiceCompile && !codeGenFile.XamlTaskItems.Any(t => t.OutOfDate()))
+                {
+                    continue;
+                }
                 ReportExistingGeneratedCodeFile(codeGenFile.TargetFolderFullPath, codeGenFile.BaseFileName);
             }
 
             foreach (TaskItemFilename tif in SourceFileManager.ProjectXamlTaskItems)
             {
+                if (IsServiceCompile && !tif.OutOfDate())
+                {
+                    continue;
+                }
                 ReportExistingGeneratedXamlFiles(tif);
             }
 
@@ -774,7 +828,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         //
         public bool VerifyWorkDone()
         {
-            if (this.IsPass1 == true)
+            // The service chooses files from its request, not from timestamps, so there is nothing to verify.
+            if (this.IsPass1 == true || this.IsServiceCompile)
                 return true;
 
             // Get the latest timestamp of the generated file
@@ -802,6 +857,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public void SaveStateBeforeFinishing()
         {
             this.SourceFileManager.SaveState();
+        }
+
+        // The compiler service keeps its saved state in memory between compiles instead of rewriting the file.
+        internal void UpdateSavedStateInMemory()
+        {
+            this.SourceFileManager.PrepareToSaveState();
         }
 
         public bool DoExecute()
@@ -860,6 +921,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
 
             CleanUpSavedState();
+            PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "source files and saved state");
+
+            if (IsServiceCompile)
+            {
+                foreach (TaskItemFilename tif in SourceFileManager.ProjectXamlTaskItems)
+                {
+                    tif.ServiceOutOfDate = ServiceXamlFilesToCompile.Contains(tif.SourceXamlFullPath);
+                }
+            }
 
             bool areGeneratedFilesListsUpdated = false;
             bool hotReloadStableConnectionIdsEnabled =
@@ -875,12 +945,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
             // Checking this always keeps us up-to-date, e.g. the first build after a solution load
             // prepares us for the 2nd build.
-            bool didAssembliesChange = DidAssembliesChange();
-            bool xamlTypeInfoNeeded = IsXAMLTypeInfoNeeded();
+            // The compiler service compiles exactly what it was asked to, so it skips these checks.
+            bool didAssembliesChange = !IsServiceCompile && DidAssembliesChange();
+            bool xamlTypeInfoNeeded = !IsServiceCompile && IsXAMLTypeInfoNeeded();
             // If the feature ctrl flags change, then skip checking every xaml file - we'll assume that since the user
             // edited the project file that something needs to be done.
-            bool didFeatureCtrlFlagsChange = DidFeatureControlFlagsChange();
-            bool didXamlOptionalChangesChange = DidXamlOptionalChangesChange();
+            bool didFeatureCtrlFlagsChange = !IsServiceCompile && DidFeatureControlFlagsChange();
+            bool didXamlOptionalChangesChange = !IsServiceCompile && DidXamlOptionalChangesChange();
             if (didXamlOptionalChangesChange)
             {
                 SourceFileManager.MarkApplicationFilesDirty();
@@ -889,7 +960,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
 
-            if (!hotReloadStableConnectionIdsEnabled &&
+            if (!IsServiceCompile &&
+                !hotReloadStableConnectionIdsEnabled &&
                 !removedHotReloadArtifacts &&
                 (xamlTypeInfoNeeded == false) &&
                 (didAssembliesChange == false) &&
@@ -914,6 +986,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
             }
 
+            PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "up-to-date checks");
             if (s_typeUniverse == null)
             {
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_CreatingTypeUniverse);
@@ -936,10 +1009,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 SourceFileManager.PropagateOutOfDateStatus(_schemaContext);
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "propagate out-of-date");
 
                 _xamlMetadataProvider = new XbfMetadataProvider(_schemaContext);
 
                 _projectInfo = GetProjectInfo();
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "project info");
                 _typeInfoCollector = new TypeInfoCollector(_schemaContext, XamlPlatform, EnableBindingDiagnostics);
                 if (hotReloadStableConnectionIdsEnabled)
                 {
@@ -953,6 +1028,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     LogError_CannotResolveWinUIMetadata();
                     return false;
                 }
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "IXamlType lookup");
 
                 foreach (TaskItemFilename tif in SourceFileManager.ProjectXamlTaskItems)
                 {
@@ -988,7 +1064,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                             // Even if we want to skip type info collecting in pass 2, we always need to collect
                             // the App's type info to figure out the application name.
                             // When we aren't skipping type info, we want to collect everything.
-                            if (!skipPass2TypeInfo || tif.IsApplication)
+                            bool collectTypeInfo = !skipPass2TypeInfo || tif.IsApplication;
+                            if (IsServiceCompile && !ServiceCollectAllTypeInfo)
+                            {
+                                collectTypeInfo &= tif.IsApplication || tif.OutOfDate();
+                            }
+                            if (collectTypeInfo)
                             {
                                 failed |= !ProcessXamlFile_XamlTypeInfo(tif, ref xamlDomRoot);
                             }
@@ -1016,13 +1097,17 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 // All the XAML files have been processed (and all XAML file errors reported).
                 // If there was a problem we can fail out now.
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "page loop");
                 if (!result)
                 {
                     return false;
                 }
 
                 // Only search for Metadata providers and Bindable types in Pass2.
-                if (!IsPass1 && !ShouldSuppressTypeInfoCodeGen())
+                // The service leaves XamlTypeInfo alone in pass 1: the C# pass 1 stub only exists for the
+                // build's intermediate compile, and a service caller already has the real file.
+                bool serviceSkipsTypeInfo = IsServiceCompile && (IsPass1 || !ServiceCollectAllTypeInfo);
+                if (!IsPass1 && !ShouldSuppressTypeInfoCodeGen() && !serviceSkipsTypeInfo)
                 {
                     _typeInfoCollector.AddMetadataAndBindableTypes(_loadedNonSystemAssemblies, _localAssembly);
                     if (!ReportSchemaErrors(String.Empty))
@@ -1043,7 +1128,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 // Create Code Generator
                 _codeGenerator = new XamlCodeGenerator(Language, IsPass1, _projectInfo, _typeInfoCollector.SchemaInfo);
-                if (IsPass1 && Language.Name == ProgrammingLanguage.CSharp)
+                if (IsPass1 && Language.Name == ProgrammingLanguage.CSharp && !IsServiceCompile)
                 {
                     string xamlTypeInfoFile = Path.Combine(OutputFolderFullpath, KnownStrings.XamlTypeInfo + Language.Pass2Extension);
                     ConfigureCSharpPass1TypeInfoGeneration(_projectInfo, _codeGenerator, xamlTypeInfoFile);
@@ -1054,6 +1139,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 // XBF generation is later (from the edited XAML).
                 foreach (TaskItemFilename tif in SourceFileManager.ClasslessXamlFiles)
                 {
+                    if (IsServiceCompile && !tif.OutOfDate())
+                    {
+                        continue;
+                    }
                     if (!GenerateClasslessXamlOutputFile(tif.SourceXamlFullPath, tif.XamlGivenPath, tif.TargetFolder, tif.FileNameNoExtension, tif.XamlOutputFilename))
                         return false;
                 }
@@ -1074,6 +1163,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 // Generating Binding Info needs to happen after GeneratePageOutputFiles because
                 // Binding Steps are parsed there.
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "code generation");
                 GenerateBindingInfo();
 
                 // TODO: does this fix the file generation issue
@@ -1082,8 +1172,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     UpdateGeneratedFilesLists();
                     areGeneratedFilesListsUpdated = true;
                 }
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "binding info and file lists");
 
-                if (!IsPass1 && !String.IsNullOrWhiteSpace(this.RootsLog))
+                if (!IsPass1 && !IsServiceCompile && !String.IsNullOrWhiteSpace(this.RootsLog))
                 {
                     if (!WriteRootsFile(_typeInfoCollector.RootLog, this.RootsLog))
                         return false;
@@ -1091,7 +1182,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 // Native languages generate their pass-1 type info, and C# generates the
                 // XamlMetaDataProvider API stub used by the intermediate compilation.
-                if (!GenerateTypeInfo())
+                if (!serviceSkipsTypeInfo && !GenerateTypeInfo())
                 {
                     return false;
                 }
@@ -1106,7 +1197,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         {
                             return false;
                         }
-                        if (!GenerateSdkXbfFiles())
+                        if (!IsServiceCompile && !GenerateSdkXbfFiles())
                         {
                             return false;
                         }
@@ -1157,12 +1248,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 RemoveLmrAssemblyResolveHandler();
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "generate");
                 if (shouldVerifyWorkDone == true)
                 {
                     bool isDone = VerifyWorkDone();
                     Debug.Assert(isDone, "VerifyWorkDone checked failed");
                 }
                 Core.InstanceCacheManager.ClearCache();
+                PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "verify and clear caches");
                 if (_hotReloadConnectionIdLedgerSession != null)
                 {
                     _hotReloadConnectionIdLedgerSession.Dispose();
@@ -1292,6 +1385,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public static Assembly TryLoadAssembly(string reference)
         {
             string fullPath = Path.GetFullPath(reference);
+            Assembly loaded;
+            if (s_typeUniverse.TryGetLoadedAssembly(fullPath, out loaded))
+            {
+                return loaded;
+            }
             if (!File.Exists(fullPath))
             {
                 return null;
@@ -1387,8 +1485,23 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         /// <summary>
         /// We have to free up any assemblies we may have kept open
         /// </summary>
+        // Drop the project's assembly loaded by a previous service compile, and every cache that refers to it.
+        private static void ReleaseServiceLocalAssembly()
+        {
+            Assembly previous = s_serviceLocalAssembly;
+            s_serviceLocalAssembly = null;
+            if (previous == null || s_typeUniverse == null)
+            {
+                return;
+            }
+            s_typeResolver?.RemoveAssemblyFromTypeNameMap(previous);
+            DirectUI.ReflectionHelper.Release(previous);
+            s_typeUniverse.UnloadAssembly(previous);
+        }
+
         public void UnloadReferences()
         {
+            s_serviceLocalAssembly = null;
             if (s_typeUniverse != null)
             {
                 // We'll enable this in the future if needed.
@@ -1414,10 +1527,26 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // DO NOT LOAD systemExtraReferenceItems
             _systemExtraReferenceItems = systemExtraReferenceItems;
 
+            if (IsServiceCompile)
+            {
+                // Pass 1 never sees the project's assembly, and pass 2 must see only the newest build of it.
+                ReleaseServiceLocalAssembly();
+            }
+
             if (LocalAssembly != null)
             {
                 _localAssemblyName = LocalAssembly.ItemSpec;
-                _localAssembly = LoadAssembly(_localAssemblyName);
+                if (IsServiceCompile)
+                {
+                    _localAssembly = ServiceLocalAssemblyImage != null
+                        ? s_typeUniverse.LoadAssemblyFromImage(ServiceLocalAssemblyImage, _localAssemblyName)
+                        : LoadAssembly(_localAssemblyName);
+                    s_serviceLocalAssembly = _localAssembly;
+                }
+                else
+                {
+                    _localAssembly = LoadAssembly(_localAssemblyName);
+                }
                 _loadedNonSystemAssemblies.Add(_localAssembly);
             }
 
@@ -1478,6 +1607,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             foreach (FileNameAndContentPair codeFile in generatedFiles)
             {
                 string outputFilename = Path.Combine(targetFolder, codeFile.FileName);
+                if (ServiceWrittenFiles != null)
+                {
+                    ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile.Contents;
+                }
 
                 if (updateOnlyIfContentNew)
                 {
@@ -1525,6 +1658,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     // then if the contents of the new version are the same as the backup
                     // move the timestamp back to the same time as the backup.
                     string outputFilename = Path.Combine(OutputFolderFullpath, codeFile0.FileName);
+                    if (ServiceWrittenFiles != null)
+                    {
+                        ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile0.Contents;
+                    }
                     string backupFilename = outputFilename + KnownStrings.BackupSuffix;
                     if (File.Exists(backupFilename))
                     {
@@ -2362,7 +2499,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // of the local assembly.   But we don't need to do this if Pass1 is just a Design Time Build from VS.
             // There was an issue with C++ where if the VS buffer was dirty, Design Type Build would run immediatly after
             // normal build and can delete the pass2 (.hpp) file, if we don't check what *kind* of Pass1 we are running.
-            if (IsPass1 && !IsDesignTimeBuild)
+            if (IsPass1 && !IsDesignTimeBuild && !IsServiceCompile)
             {
                 Debug.Assert(!String.IsNullOrEmpty(classCodeInfo.BaseFileName));
                 string srcOutputFileName2 = Path.Combine(classCodeInfo.TargetFolder, classCodeInfo.BaseFileName + Language.Pass2Extension);

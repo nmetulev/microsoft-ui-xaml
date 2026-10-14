@@ -17,6 +17,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
             ReflectionHelper._typeAttrs = new ConcurrentDictionary<String, IList<CustomAttributeData>>();
         }
 
+        // Drop cached attributes for members of one assembly (the project's own, before it is replaced).
+        internal static void Release(Assembly assembly)
+        {
+            string assemblyName = assembly.FullName;
+            foreach (string key in _typeAttrs.Keys)
+            {
+                if (key.IndexOf(assemblyName, StringComparison.Ordinal) >= 0)
+                {
+                    _typeAttrs.TryRemove(key, out _);
+                }
+            }
+        }
+
         internal static IEnumerable<CustomAttributeData> GetCustomAttributeData(Type type, bool inherit, string attributeTypeFullName)
         {
             var allAttributesOnTheType = GetCustomAttributeData(type, inherit);

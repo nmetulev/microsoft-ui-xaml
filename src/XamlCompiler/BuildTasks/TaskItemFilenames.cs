@@ -33,6 +33,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public string ClassFullName { get; set; }
         public bool IsForcedOutOfDate { get; set; }
 
+        // Set by the compiler service: true for files in the caller's change list, false for the rest.
+        // Null (the default) keeps the normal timestamp-based decision.
+        public bool? ServiceOutOfDate { get; set; }
+
         public string XamlResourceMapName { get; private set; }
         public string XamlComponentResourceLocation { get; private set; }
 
@@ -114,6 +118,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             this.RelativePathFromGeneratedCodeToXamlFile = FileHelpers.GetRelativePath(Path.GetDirectoryName(TargetFolder), this.ApparentRelativePath);
 
+            // Timestamps and output sizes only feed the up-to-date checks, which the compiler service
+            // replaces with its request, so it skips probing files it wasn't asked to compile.
+            if (_srcMgr.IsServiceCompile && !_srcMgr.IsInServiceRequest(SourceXamlFullPath))
+            {
+                this.IsForcedOutOfDate = false;
+                return;
+            }
+
             Refresh(_srcMgr.SavedState);
         }
 
@@ -161,6 +173,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // A rebuild triggered by the above will also regnerated the XBF (if not disabled),
             // so simple "later than" tests are approprate for XBF files.
             // Note #2) A missing file has a very old date (Jan 1 1601)
+
+            // The compiler service decides which files to compile from the caller's change list,
+            // not from timestamps and saved state.
+            if (this.ServiceOutOfDate.HasValue)
+            {
+                return this.ServiceOutOfDate.Value;
+            }
 
             ////
             // All the reasons a XAML file could be "out of date"

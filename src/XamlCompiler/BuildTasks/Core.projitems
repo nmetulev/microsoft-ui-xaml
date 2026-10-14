@@ -74,6 +74,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)XamlHelper.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)FingerPrinter.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)SaveState.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)XamlCompilerService.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)TaskItemFilenames.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)VCMetaManaged.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\T4Base.cs" />

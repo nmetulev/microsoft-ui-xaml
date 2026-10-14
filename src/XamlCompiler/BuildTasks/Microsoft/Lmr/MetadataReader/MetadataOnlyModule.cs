@@ -2288,6 +2288,24 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
 
         Dictionary<String , Type> _typeCache = new Dictionary<String, Type>();
 
+        // Drop cached lookups that resolved into (or name) another assembly that is being replaced.
+        internal void ForgetTypesFrom(Assembly assembly, string assemblyName)
+        {
+            List<string> stale = new List<string>();
+            foreach (KeyValuePair<string, Type> entry in _typeCache)
+            {
+                if ((entry.Value != null && ReferenceEquals(entry.Value.Assembly, assembly)) ||
+                    entry.Key.IndexOf(assemblyName, StringComparison.Ordinal) >= 0)
+                {
+                    stale.Add(entry.Key);
+                }
+            }
+            foreach (string key in stale)
+            {
+                _typeCache.Remove(key);
+            }
+        }
+
         override public Type GetType(string className, bool throwOnError, bool ignoreCase)
         {
             if (ignoreCase)
