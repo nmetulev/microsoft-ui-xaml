@@ -11,6 +11,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
         {
             try
             {
+                if (args.Length > 0 && args[0] == "--serve")
+                {
+                    return ServeXaml.Run(args);
+                }
+
                 CompileXaml compiler = new CompileXaml();
                 return compiler.Run(args);
             }

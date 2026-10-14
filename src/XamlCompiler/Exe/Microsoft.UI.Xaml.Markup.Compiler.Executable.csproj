@@ -20,6 +20,7 @@
     <Compile Include="$(BuildTasksDir)ConsoleLogger.cs" />
     <Compile Include="$(BuildTasksDir)Program.cs" />
     <Compile Include="$(BuildTasksDir)ConsoleCompileXaml.cs" />
+    <Compile Include="$(BuildTasksDir)ServeXaml.cs" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CX\CXMetadataDelegates.cs">
