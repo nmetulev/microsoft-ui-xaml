@@ -116,7 +116,7 @@ Before shipping we would:
 
 | State | Kept between calls | Replaced when |
 |---|---|---|
-| Type universe: referenced assemblies and winmds, LMR caches, type-name map | Yes | Never; recreate the service if references change |
+| Type universe: referenced assemblies and winmds, LMR caches, type-name map | Yes, read fully into memory (no files held open) | Never; recreate the service if references change |
 | The project's own assembly | Yes | On every pass 2. The old one is unloaded and every cache that points at it is dropped |
 | Saved state (x:Class per file, generated file names) | Yes, in memory | Updated after each call |
 | Set of types and members in XamlTypeInfo | Yes | After each pass 2 with `regenerateTypeInfo: true` |
@@ -245,6 +245,9 @@ Fixes that matter for builds too:
 - `Environment.CurrentDirectory` is set to the project folder during a compile, because some inputs
   are relative. A host shouldn't run other work that depends on the current directory concurrently.
 - One project per process, until the type universe is per-instance.
+- References are loaded once. If a referenced library is rebuilt, the host must recreate the
+  service; it doesn't notice by itself.
+- Memory: the warm Gallery service sits at about 400 to 570 MB working set, mostly reference metadata.
 - The unit tests in `XamlCompilerTests.sln` weren't run: they need the full product build
   (MergedWinMD and genxbf from source). The regression checks above compare against the unmodified
   compiler instead.
