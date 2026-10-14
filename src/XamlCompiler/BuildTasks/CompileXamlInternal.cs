@@ -1104,9 +1104,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 // Only search for Metadata providers and Bindable types in Pass2.
-                // The service leaves XamlTypeInfo alone in pass 1: the C# pass 1 stub only exists for the
-                // build's intermediate compile, and a service caller already has the real file.
-                bool serviceSkipsTypeInfo = IsServiceCompile && (IsPass1 || !ServiceCollectAllTypeInfo);
+                // The service leaves XamlTypeInfo alone in a C# pass 1: that stub only exists for the build's
+                // intermediate compile, and a service caller already has the real file. Native pass 1 type
+                // info (XamlTypeInfo.xaml.g.h and friends) is real compiler input, so it is still generated.
+                bool serviceSkipsTypeInfo = IsServiceCompile &&
+                    ((IsPass1 && Language.IsManaged) || (!IsPass1 && !ServiceCollectAllTypeInfo));
                 if (!IsPass1 && !ShouldSuppressTypeInfoCodeGen() && !serviceSkipsTypeInfo)
                 {
                     _typeInfoCollector.AddMetadataAndBindableTypes(_loadedNonSystemAssemblies, _localAssembly);

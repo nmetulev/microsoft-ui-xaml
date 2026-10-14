@@ -417,15 +417,23 @@ internal static class Program
         Console.WriteLine($"service warm-up (full pass 1 + pass 2): {w.ElapsedMilliseconds} ms ok={warm1.Success && warm2.Success}");
 
         // The app's compilation, as a hot reload host would hold it: generated files come from the
-        // service's output folder.
-        w.Restart();
-        CSharpCompilation compilation = CreateCompilation(rspPath, projectDir, buildOutput + "\\", serviceOutput + "\\");
-        using (var m = new MemoryStream())
+        // service's output folder. --no-roslyn skips this (native projects, or to time the compiler alone).
+        bool useRoslyn = !args.Contains("--no-roslyn");
+        CSharpCompilation compilation = null;
+        byte[] imageBeforeEdit = null;
+        if (useRoslyn)
         {
-            compilation.Emit(m, options: new EmitOptions(metadataOnly: true, includePrivateMembers: true));
+            w.Restart();
+            compilation = CreateCompilation(rspPath, projectDir, buildOutput + "\\", serviceOutput + "\\");
+            using (var m = new MemoryStream())
+            {
+                compilation.Emit(m, options: new EmitOptions(metadataOnly: true, includePrivateMembers: true));
+            }
+            Console.WriteLine($"roslyn warm-up (parse, generators, first metadata emit): {w.ElapsedMilliseconds} ms");
+            imageBeforeEdit = EmitMetadata(compilation, out _);
         }
-        Console.WriteLine($"roslyn warm-up (parse, generators, first metadata emit): {w.ElapsedMilliseconds} ms");
-        byte[] imageBeforeEdit = EmitMetadata(compilation, out _);
+        var previousText = new Dictionary<string, string>(warm1.GeneratedText.Concat(warm2.GeneratedText).GroupBy(p => p.Key).Select(g => g.Last()), StringComparer.OrdinalIgnoreCase);
+        var previousXbf = new Dictionary<string, byte[]>(warm2.GeneratedXbf, StringComparer.OrdinalIgnoreCase);
 
         try
         {
@@ -447,20 +455,44 @@ internal static class Program
                     File.WriteAllText(csPath, applyEdit ? csEdited : csOriginal);
                     changedSources[csPath] = applyEdit ? csEdited : csOriginal;
                 }
-                foreach (KeyValuePair<string, string> file in changedSources)
+                byte[] image = null;
+                if (useRoslyn)
                 {
-                    SyntaxTree old = compilation.SyntaxTrees.FirstOrDefault(t => string.Equals(t.FilePath, file.Key, StringComparison.OrdinalIgnoreCase));
-                    if (old != null)
+                    foreach (KeyValuePair<string, string> file in changedSources)
                     {
-                        compilation = compilation.ReplaceSyntaxTree(old, old.WithChangedText(Microsoft.CodeAnalysis.Text.SourceText.From(file.Value, System.Text.Encoding.UTF8)));
+                        SyntaxTree old = compilation.SyntaxTrees.FirstOrDefault(t => string.Equals(t.FilePath, file.Key, StringComparison.OrdinalIgnoreCase));
+                        if (old != null)
+                        {
+                            compilation = compilation.ReplaceSyntaxTree(old, old.WithChangedText(Microsoft.CodeAnalysis.Text.SourceText.From(file.Value, System.Text.Encoding.UTF8)));
+                        }
                     }
+                    image = EmitMetadata(compilation, out double emitMs);
+                    Console.WriteLine($"  roslyn: update trees + metadata-only emit {w.Elapsed.TotalMilliseconds:F0} ms (emit {emitMs:F0} ms, {image.Length:N0} bytes)");
                 }
-                byte[] image = EmitMetadata(compilation, out double emitMs);
-                Console.WriteLine($"  roslyn: update trees + metadata-only emit {w.Elapsed.TotalMilliseconds:F0} ms (emit {emitMs:F0} ms, {image.Length:N0} bytes)");
 
                 XamlCompileResult p2 = service.CompilePass2(new[] { page }, image, regenerateTypeInfo: false);
                 Report("  pass2 (new image)", p2);
-                Console.WriteLine($"  per-save total (pass1 + roslyn metadata emit + pass2): {total.Elapsed.TotalMilliseconds:F0} ms");
+                Console.WriteLine($"  per-save total (pass1 + {(useRoslyn ? "roslyn metadata emit + " : "")}pass2): {total.Elapsed.TotalMilliseconds:F0} ms");
+
+                // Which generated files actually changed compared with the previous compile.
+                var changed = new List<string>();
+                foreach (var f in p1.GeneratedText.Concat(p2.GeneratedText))
+                {
+                    if (!previousText.TryGetValue(f.Key, out string before) || before != f.Value)
+                    {
+                        changed.Add(Path.GetFileName(f.Key));
+                    }
+                    previousText[f.Key] = f.Value;
+                }
+                foreach (var f in p2.GeneratedXbf)
+                {
+                    if (!previousXbf.TryGetValue(f.Key, out byte[] before) || !before.AsSpan().SequenceEqual(f.Value))
+                    {
+                        changed.Add(Path.GetFileName(f.Key));
+                    }
+                    previousXbf[f.Key] = f.Value;
+                }
+                Console.WriteLine($"  changed outputs: {(changed.Count == 0 ? "none" : string.Join(", ", changed))}");
                 Save(p2, Path.Combine(resultDir, $"round{round}-new-image"), serviceOutput);
                 if (p2.XamlTypeInfoMayBeStale)
                 {
@@ -471,7 +503,7 @@ internal static class Program
 
                 // Same pass 2 against the image from before any edit: is a new image needed at all
                 // for XAML-only edits? (Compiled into a scratch run, then the new-image result is restored.)
-                if (!args.Contains("--skip-old-image"))
+                if (useRoslyn && !args.Contains("--skip-old-image"))
                 {
                     XamlCompileResult p2Old = service.CompilePass2(new[] { page }, imageBeforeEdit, regenerateTypeInfo: false);
                     Report("  pass2 (pre-edit image)", p2Old);
