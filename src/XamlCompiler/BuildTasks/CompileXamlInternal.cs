@@ -186,6 +186,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
         public bool EnableHotReloadStableConnectionIds { get; set; }
+
+        // Hot reload builds (the Debug stamp): generated code is shaped so .NET hot reload can apply each
+        // recompile as a delta. Off for release builds, whose output is unchanged.
+        public bool EnableXamlHotReload { get; set; }
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
 
@@ -209,6 +213,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal IDictionary<string, string> ServiceWrittenFiles { get; set; }
 
         internal bool IsServiceCompile => ServiceXamlFilesToCompile != null;
+
+        // Where hot reload state (the connection ID ledger, retired members) lives: the build's own output folder,
+        // even when the service writes generated files elsewhere, so builds and service compiles continue one history.
+        internal string ServiceHotReloadStateFolder { get; set; }
+        internal string HotReloadStateFolder => ServiceHotReloadStateFolder ?? OutputFolderFullpath;
+
+        // C# only: .NET hot reload applies the generated code; native projects get stable IDs but no other changes.
+        internal bool IsHotReloadCodeGen => EnableXamlHotReload && Language != null && Language.Name == ProgrammingLanguage.CSharp;
 
         // Pass 2 only: the types and user-type members collected for XamlTypeInfo, as "Type" and
         // "Type.Member" names. Lets the service tell whether a page edit needs XamlTypeInfo regenerated.
@@ -378,6 +390,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             EnableBindingDiagnostics = FeatureControlFlags.HasFlag(FeatureCtrlFlags.EnableBindingDiagnostics);
             IgnoreSpecifiedTargetPlatformMinVersion = IgnoreSpecifiedTargetPlatformMinVersion;
             EnableHotReloadStableConnectionIds = i.EnableHotReloadStableConnectionIds;
+            EnableXamlHotReload = i.EnableXamlHotReload;
+            if (IsHotReloadCodeGen)
+            {
+                Language = Language.WithPass1Extension(Compiler.Language.CSharpHotReloadPass1Extension);
+            }
 
             XamlApplications = GetFileItems(i.XamlApplications);
             XamlPages = GetFileItems(i.XamlPages);
@@ -896,7 +913,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // if there are no XAML files then issue a warning and exit (successfully), because we have nothing to do.
             if ((XamlApplications == null || !XamlApplications.Any()) && (XamlPages == null || XamlPages.Count == 0))
             {
-                if (!IsPass1 && !IsDesignTimeBuild)
+                if (!IsPass1 && !IsDesignTimeBuild && !IsServiceCompile)
                 {
                     HotReloadConnectionIdLedgerSession.Clean(OutputFolderFullpath);
                 }
@@ -937,7 +954,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 !IsDesignTimeBuild &&
                 EnableHotReloadStableConnectionIds;
             bool removedHotReloadArtifacts = false;
-            if (!IsPass1 && !IsDesignTimeBuild && !hotReloadStableConnectionIdsEnabled)
+            if (!IsPass1 && !IsDesignTimeBuild && !IsServiceCompile && !hotReloadStableConnectionIdsEnabled)
             {
                 removedHotReloadArtifacts =
                     HotReloadConnectionIdLedgerSession.Clean(OutputFolderFullpath);
@@ -1021,7 +1038,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 if (hotReloadStableConnectionIdsEnabled)
                 {
                     _hotReloadConnectionIdLedgerSession =
-                        HotReloadConnectionIdLedgerSession.Open(OutputFolderFullpath);
+                        HotReloadConnectionIdLedgerSession.Open(HotReloadStateFolder);
                     _hotReloadConnectionIdLedgerSession.BeginPublication();
                 }
                 Type ixt = GetIXamlType(_loadedAssemblies);
@@ -1040,11 +1057,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     // the file itself is different. Some of the feature ctrl flags will cause different code to be generated
                     // on a per page basis (i.e. EnableXBindDiagnostics), while others will only affect app.xaml (i.e. EnableWin32CodeGen).
                     // But we'll be conservative and just assume that all files need to regenerate if the flags have changed
+                    // A build with stable connection IDs republishes every page's ledger; a service compile updates only
+                    // the pages it was asked for and keeps the other pages' ledger entries.
                     bool forceRegenerate =
                         didAssembliesChange ||
                         didFeatureCtrlFlagsChange ||
                         removedHotReloadArtifacts ||
-                        hotReloadStableConnectionIdsEnabled;
+                        (hotReloadStableConnectionIdsEnabled && !IsServiceCompile);
                     if (IsPass1 && !tif.OutOfDate() && !forceRegenerate)
                     {
                         // If the file is up to date then report the existing "on disk" generated
@@ -1209,11 +1228,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                     if (_hotReloadConnectionIdLedgerSession != null)
                     {
+                        PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "xbf");
                         foreach (XamlClassCodeInfo classCodeInfo in _classCodeInfos.Values)
                         {
                             classCodeInfo.PrepareHotReloadConnectionIdArtifacts();
                         }
-                        _hotReloadConnectionIdLedgerSession.Commit();
+                        _hotReloadConnectionIdLedgerSession.Commit(removeStaleClasses: !IsServiceCompile);
+                        PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "hot reload connection ID ledger");
                     }
                 }
                 catch (TypeLoadException)
@@ -2191,6 +2212,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             projectInfo.RootNamespace = RootNamespace;
             projectInfo.IsLibrary = IsOutputTypeLibrary || IsOutputTypeWinMd;
             projectInfo.ShouldGenerateDisableXBind = this.EnableXBindDiagnostics;
+            projectInfo.IsHotReloadCodeGen = this.IsHotReloadCodeGen;
             projectInfo.EnableTypeInfoReflection = EnableTypeInfoReflection;
             projectInfo.EnableDefaultValidationContextGeneration = EnableDefaultValidationContextGeneration;
 

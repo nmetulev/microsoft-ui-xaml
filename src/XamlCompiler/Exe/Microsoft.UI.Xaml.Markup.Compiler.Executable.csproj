@@ -38,11 +38,13 @@
       <DesignTime>True</DesignTime>
       <DependentUpon>CSharpAppPass1.tt</DependentUpon>
     </Compile>
+    <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass1.HotReload.cs" />
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass1.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>
       <DependentUpon>CSharpPagePass1.tt</DependentUpon>
     </Compile>
+    <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass2.HotReload.cs" />
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass2.cs">
       <AutoGen>True</AutoGen>
       <DesignTime>True</DesignTime>

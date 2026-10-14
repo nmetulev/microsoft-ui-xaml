@@ -25,6 +25,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     {
         private readonly CompilerInputs _pass2Inputs;
         private readonly string _outputPath;
+        // Hot reload state (connection ID ledger, retired members) stays with the build's output, so the next build
+        // continues the same history as the running app.
+        private readonly string _buildOutputFolder;
         private readonly string _savedStateFile;
         private SavedStateManager _savedState;
         private HashSet<string> _typeInfoKeys;
@@ -40,6 +43,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             _pass2Inputs = buildInputs ?? throw new ArgumentNullException(nameof(buildInputs));
             ProjectFolder = Path.GetDirectoryName(buildInputs.ProjectPath);
             _outputPath = outputPath ?? buildInputs.OutputPath;
+            _buildOutputFolder = Path.GetFullPath(Path.IsPathRooted(buildInputs.OutputPath) ? buildInputs.OutputPath : Path.Combine(ProjectFolder, buildInputs.OutputPath));
             string fullOutputPath = Path.IsPathRooted(_outputPath) ? _outputPath : Path.Combine(ProjectFolder, _outputPath);
             Directory.CreateDirectory(fullOutputPath);
             _savedStateFile = Path.Combine(fullOutputPath, "XamlSaveStateFile.xml");
@@ -112,6 +116,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 core.ServiceCollectAllTypeInfo = regenerateTypeInfo;
                 core.ServiceLocalAssemblyImage = isPass1 ? null : localAssemblyImage;
                 core.ServiceWrittenFiles = result.GeneratedText;
+                core.ServiceHotReloadStateFolder = _buildOutputFolder;
 
                 result.Success = core.DoExecute();
                 if (result.Success)
@@ -216,6 +221,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 TargetFileName = i.TargetFileName,
                 IgnoreSpecifiedTargetPlatformMinVersion = i.IgnoreSpecifiedTargetPlatformMinVersion,
                 EnableHotReloadStableConnectionIds = i.EnableHotReloadStableConnectionIds,
+                EnableXamlHotReload = i.EnableXamlHotReload,
                 EnabledXamlOptionalChanges = i.EnabledXamlOptionalChanges,
                 DisabledXamlOptionalChanges = i.DisabledXamlOptionalChanges,
             };

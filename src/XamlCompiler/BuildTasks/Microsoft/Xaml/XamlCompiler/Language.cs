@@ -61,6 +61,20 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return language;
         }
 
+        // C# hot reload builds name the pass 1 file Foo.i.g.cs: .NET hot reload ignores files named *.g.i.cs (it treats
+        // them as WPF design-time files), but WinUI declares x:Name fields, InitializeComponent and Bindings there.
+        public const string CSharpHotReloadPass1Extension = ".i.g.cs";
+
+        public Language WithPass1Extension(string pass1Extension)
+        {
+            return new Language(
+                this.Name, pass1Extension, this.Pass2Extension, this.IsManaged, this.IsStringNullable, this.IsExperimental,
+                this.AppPass1CodeGenerator, this.AppPass2CodeGenerator, this.PagePass1CodeGenerator, this.PagePass2CodeGenerator,
+                this.XamlMetaDataProviderPass1, this.XamlMetaDataProviderPass2, this.TypeInfoPass1CodeGenerator,
+                this.TypeInfoPass1ImplCodeGenerator, this.TypeInfoPass2CodeGenerator, this.BindingInfoPass1CodeGenerator,
+                this.BindingInfoPass2CodeGenerator);
+        }
+
         private Language(
             string name,
             string pass1Extension,

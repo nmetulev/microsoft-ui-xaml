@@ -773,7 +773,11 @@ this.Write("> RootWeakReference { get; set; }\r\n");
 this.Write("            #pragma warning restore 649\r\n");
 
              } 
-this.Write("            private bool initialized = false;\r\n            private const int NOT_" +
+this.Write("            private bool initialized");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(DefaultInitializer("false")));
+
+this.Write(";\r\n            private const int NOT_" +
         "PHASED = (1 << 31);\r\n            private const int DATA_CHANGED = (1 << 30);\r\n");
 
              if (bindUniverse.DistinctConvertersUsed.Count() > 0) 
@@ -800,7 +804,11 @@ this.Write("> converterLookupRoot;\r\n");
              }
              if (bindUniverse.NeedsIDataTemplateExtension) 
              { 
-this.Write("            private bool removedDataContextHandler = false;\r\n");
+this.Write("            private bool removedDataContextHandler");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(DefaultInitializer("false")));
+
+this.Write(";\r\n");
 
              } 
 this.Write("\r\n            // Fields for each control that has bindings.\r\n");
@@ -884,7 +892,9 @@ this.Write("            private static bool ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(ba.DisableFlagName));
 
-this.Write(" = false;\r\n");
+this.Write(this.ToStringHelper.ToStringWithCulture(DefaultInitializer("false")));
+
+this.Write(";\r\n");
 
                      }
                  }
@@ -1650,8 +1660,11 @@ this.Write("                this.initialized = true;\r\n            }\r\n\r\n   
 
              if (bindUniverse.NeedsBindingsTracking)
              {
-this.Write("                this.bindingsTracking.ReleaseAllListeners();\r\n                thi" +
-        "s.initialized = false;\r\n");
+this.Write("                this.bindingsTracking");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadNullConditional));
+
+this.Write(".ReleaseAllListeners();\r\n                this.initialized = false;\r\n");
 
              }
 this.Write("            }\r\n\r\n            public void DisconnectUnloadedObject(int connectionI" +
@@ -1808,13 +1821,19 @@ this.Write("\r\n            public void Activated(object obj, ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownNamespaces.Xaml)));
 
-this.Write(".WindowActivatedEventArgs data)\r\n            {\r\n                this.Initialize()" +
-        ";\r\n            }\r\n\r\n            public void Loading(");
+this.Write(".WindowActivatedEventArgs data)\r\n            {\r\n");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadRetiredBindingsGuard("obj")));
+
+this.Write("                this.Initialize();\r\n            }\r\n\r\n            public void Loading(");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.FrameworkElement)));
 
-this.Write(" src, object data)\r\n            {\r\n                this.Initialize();\r\n          " +
-        "  }\r\n");
+this.Write(" src, object data)\r\n            {\r\n");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadRetiredBindingsGuard("src")));
+
+this.Write("                this.Initialize();\r\n            }\r\n");
 
              }
              if (bindUniverse.DistinctConvertersUsed.Count() > 0) 
@@ -2363,7 +2382,9 @@ this.Write(" cache_");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(step.CodeName));
 
-this.Write(" = null;\r\n");
+this.Write(this.ToStringHelper.ToStringWithCulture(DefaultInitializer("null")));
+
+this.Write(";\r\n");
 
                  cacheName="cache_" +step.CodeName;
                      }
@@ -2373,7 +2394,9 @@ this.Write("                private long tokenDPC_");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(child.CodeName));
 
-this.Write(" = 0;\r\n");
+this.Write(this.ToStringHelper.ToStringWithCulture(DefaultInitializer("0")));
+
+this.Write(";\r\n");
 
                      }
                      if (step.RequiresChildNotification)

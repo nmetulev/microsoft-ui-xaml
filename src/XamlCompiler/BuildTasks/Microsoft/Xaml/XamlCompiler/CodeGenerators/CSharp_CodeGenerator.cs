@@ -31,6 +31,27 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             }
         }
 
+        // True for C# hot reload builds (EnableXamlHotReload): the generated code is shaped for .NET hot reload.
+        public bool IsHotReloadCodeGen
+        {
+            get { return ProjectInfo != null && ProjectInfo.IsHotReloadCodeGen; }
+        }
+
+        // " = value" for a field that is initialized to its default value, or nothing in hot reload builds. A redundant
+        // initializer on a static field makes Roslyn's hot reload fail (NullReferenceException in
+        // DefinitionMap.GetPreviousMethodHandle) when an update adds such a field to a type an earlier update added, and
+        // any initializer turns adding a field into an edit of the (static) constructor.
+        public string DefaultInitializer(string value)
+        {
+            return IsHotReloadCodeGen ? string.Empty : " = " + value;
+        }
+
+        // Hot reload re-runs InitializeComponent and StopTracking on objects whose fields may not be set yet.
+        public string HotReloadNullConditional
+        {
+            get { return IsHotReloadCodeGen ? "?" : string.Empty; }
+        }
+
         public string GeneratedCodeAttribute
         {
             get { return $"[global::System.CodeDom.Compiler.GeneratedCodeAttribute(\"{KnownStrings.XAMLBuildTaskAsmName}\",\" {XamlCompilerVersion}\")]"; }

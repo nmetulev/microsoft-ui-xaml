@@ -94,6 +94,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public void Commit()
         {
+            Commit(removeStaleClasses: true);
+        }
+
+        // removeStaleClasses: false when only some classes were compiled (the compiler service compiles single pages),
+        // so the ledgers of the classes that weren't compiled are kept.
+        public void Commit(bool removeStaleClasses)
+        {
             ThrowIfDisposed();
             if (!this.publicationBegun)
             {
@@ -109,7 +116,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 ledger.WritePreparedArtifacts();
             }
-            RemoveStaleClassArtifacts();
+            if (removeStaleClasses)
+            {
+                RemoveStaleClassArtifacts();
+            }
             File.Delete(this.pendingMarkerPath);
             this.committed = true;
         }
@@ -237,6 +247,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private readonly HashSet<int> retiredIds;
         private readonly HashSet<string> seenKeys = new HashSet<string>(StringComparer.Ordinal);
         private readonly List<int> currentTransientIds = new List<int>();
+        private readonly List<HotReloadConnectionIdLedgerEntry> currentTransientEntries =
+            new List<HotReloadConnectionIdLedgerEntry>();
+        // The previous compile's transient IDs by fingerprint, in allocation order. Ambiguous elements reuse them, so a
+        // recompile of the same markup allocates the same IDs; the ones nobody reuses are retired.
+        private readonly Dictionary<string, Queue<int>> previousTransientIds =
+            new Dictionary<string, Queue<int>>(StringComparer.Ordinal);
         private readonly List<HotReloadConnectionIdAllocation> allocations =
             new List<HotReloadConnectionIdAllocation>();
         private readonly bool isNewLedger;
@@ -260,7 +276,20 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 StringComparer.Ordinal);
             this.retiredIds = new HashSet<int>(file.RetiredConnectionIds);
 
-            if (file.TransientConnectionIds.Count > 0)
+            if (file.TransientEntries != null &&
+                file.TransientEntries.Select(entry => entry.ConnectionId).OrderBy(id => id).SequenceEqual(file.TransientConnectionIds))
+            {
+                foreach (HotReloadConnectionIdLedgerEntry entry in file.TransientEntries)
+                {
+                    if (!this.previousTransientIds.TryGetValue(entry.ElementKey, out Queue<int> ids))
+                    {
+                        ids = new Queue<int>();
+                        this.previousTransientIds.Add(entry.ElementKey, ids);
+                    }
+                    ids.Enqueue(entry.ConnectionId);
+                }
+            }
+            else if (file.TransientConnectionIds.Count > 0)
             {
                 foreach (int id in file.TransientConnectionIds)
                 {
@@ -335,10 +364,24 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 {
                     identity.MarkAmbiguous("The semantic key was assigned to more than one collected element.");
                 }
-                connectionId = AllocateNewId();
+                string fingerprint = GetTransientFingerprint(identity);
+                if (this.previousTransientIds.TryGetValue(fingerprint, out Queue<int> previous) && previous.Count > 0)
+                {
+                    connectionId = previous.Dequeue();
+                    identity.AllocationStatus = "transient-reused";
+                }
+                else
+                {
+                    connectionId = AllocateNewId();
+                    identity.AllocationStatus = "transient";
+                    this.dirty = true;
+                }
                 this.currentTransientIds.Add(connectionId);
-                identity.AllocationStatus = "transient";
-                this.dirty = true;
+                this.currentTransientEntries.Add(new HotReloadConnectionIdLedgerEntry
+                {
+                    ElementKey = fingerprint,
+                    ConnectionId = connectionId,
+                });
             }
 
             this.allocations.Add(new HotReloadConnectionIdAllocation(identity, connectionId));
@@ -363,6 +406,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 .ToList();
             this.file.RetiredConnectionIds = this.retiredIds.OrderBy(id => id).ToList();
             this.file.TransientConnectionIds = this.currentTransientIds.OrderBy(id => id).ToList();
+            this.file.TransientEntries = this.currentTransientEntries.Count > 0 ? this.currentTransientEntries.ToList() : null;
 
             List<HotReloadConnectionIdManifestFile> sourceFiles =
                 CreateManifestFiles(classCodeInfo);
@@ -482,8 +526,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return this.file.MaxConnectionId;
         }
 
+        private static string GetTransientFingerprint(HotReloadConnectionIdentity identity)
+        {
+            return identity.ScopeIdentity + "|" +
+                HotReloadConnectionIdText.Part("type", identity.TypeName) + "|" +
+                HotReloadConnectionIdText.Part("collision", identity.CollisionKey ?? String.Empty);
+        }
+
         private void RetireMissingEntries()
         {
+            foreach (int unused in this.previousTransientIds.Values.SelectMany(ids => ids))
+            {
+                this.retiredIds.Add(unused);
+                this.dirty = true;
+            }
+            this.previousTransientIds.Clear();
+
             foreach (string missingKey in this.activeIds.Keys
                 .Where(key => !this.seenKeys.Contains(key))
                 .ToList())
@@ -991,9 +1049,18 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
     internal static class HotReloadJsonFile
     {
+        // Serializers are thread-safe and costly to create; the compiler service writes ledgers on every save.
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<Type, DataContractJsonSerializer> s_serializers =
+            new System.Collections.Concurrent.ConcurrentDictionary<Type, DataContractJsonSerializer>();
+
+        private static DataContractJsonSerializer GetSerializer(Type type)
+        {
+            return s_serializers.GetOrAdd(type, t => new DataContractJsonSerializer(t));
+        }
+
         internal static T Read<T>(string path)
         {
-            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
+            DataContractJsonSerializer serializer = GetSerializer(typeof(T));
             using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
                 return (T)serializer.ReadObject(stream);
@@ -1002,6 +1069,18 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         internal static void Write<T>(string path, T value)
         {
+            byte[] bytes;
+            using (MemoryStream buffer = new MemoryStream())
+            {
+                GetSerializer(typeof(T)).WriteObject(buffer, value);
+                bytes = buffer.ToArray();
+            }
+            // An artifact that hasn't changed isn't rewritten (most pages on a build, and most ledgers on a save).
+            if (File.Exists(path) && new FileInfo(path).Length == bytes.Length && File.ReadAllBytes(path).SequenceEqual(bytes))
+            {
+                return;
+            }
+
             string directory = Path.GetDirectoryName(path);
             Directory.CreateDirectory(directory);
             string temporaryPath = path + "." +
@@ -1010,14 +1089,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
             try
             {
-                DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
                 using (FileStream stream = new FileStream(
                     temporaryPath,
                     FileMode.CreateNew,
                     FileAccess.Write,
                     FileShare.None))
                 {
-                    serializer.WriteObject(stream, value);
+                    stream.Write(bytes, 0, bytes.Length);
                     stream.Flush(flushToDisk: true);
                 }
 
@@ -1306,6 +1384,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         [DataMember(Name = "transientConnectionIds", Order = 8)]
         public List<int> TransientConnectionIds { get; set; }
+
+        // Fingerprint of each transient ID's element, in allocation order (see GetTransientFingerprint).
+        [DataMember(Name = "transient", Order = 9, EmitDefaultValue = false)]
+        public List<HotReloadConnectionIdLedgerEntry> TransientEntries { get; set; }
     }
 
     [DataContract]
