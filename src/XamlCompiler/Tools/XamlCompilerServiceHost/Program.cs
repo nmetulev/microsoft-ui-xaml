@@ -17,6 +17,9 @@ using Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop;
 
 // Developer tool for the XAML compiler service spike.
 //
+//   Any command: --hot-reload reads every input as a hot reload (Debug) build passes it: EnableXamlHotReload
+//   and EnableHotReloadStableConnectionIds on.
+//
 //   prepare <build input.json> <outputPath> <destDir>
 //       Writes pass1.json/pass2.json for XamlCompiler.exe, redirected to <outputPath>
 //       (relative to the project), so a full out-of-process build can be the byte-for-byte baseline.
@@ -39,6 +42,9 @@ internal static class Program
             Console.WriteLine("usage: prepare | bench | emit (see Program.cs)");
             return 1;
         }
+        // --hot-reload: every input is read as a hot reload (Debug) build would pass it.
+        s_hotReload = args.Contains("--hot-reload");
+        args = args.Where(a => a != "--hot-reload").ToArray();
         switch (args[0])
         {
             case "prepare": return Prepare(args[1], args[2], args[3]);
@@ -51,10 +57,18 @@ internal static class Program
         }
     }
 
+    private static bool s_hotReload;
+
     private static CompilerInputs ReadInputs(string path)
     {
         using FileStream s = File.OpenRead(path);
-        return JsonSerializer.Deserialize<CompilerInputs>(s);
+        CompilerInputs inputs = JsonSerializer.Deserialize<CompilerInputs>(s);
+        if (s_hotReload)
+        {
+            inputs.EnableXamlHotReload = true;
+            inputs.EnableHotReloadStableConnectionIds = true;
+        }
+        return inputs;
     }
 
     private static int Prepare(string buildInputJson, string outputPath, string destDir)
@@ -392,7 +406,7 @@ internal static class Program
 
         // A one-line edit, to show the cost on a compilation that has already been bound once.
         w.Restart();
-        SyntaxTree first = compilation.SyntaxTrees.First(t => t.FilePath.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase));
+        SyntaxTree first = compilation.SyntaxTrees.First(t => t.FilePath.EndsWith(".g.i.cs", StringComparison.OrdinalIgnoreCase) || t.FilePath.EndsWith(".i.g.cs", StringComparison.OrdinalIgnoreCase));
         CSharpCompilation edited = compilation.ReplaceSyntaxTree(first, first.WithChangedText(first.GetText().Replace(0, 0, "// edit\r\n")));
         using (var m = new MemoryStream())
         {

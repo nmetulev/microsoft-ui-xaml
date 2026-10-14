@@ -43,6 +43,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public bool ShouldGenerateDisableXBind { get; set; }
 
+        // C# hot reload builds: shape the generated code so .NET hot reload can apply each recompile.
+        public bool IsHotReloadCodeGen { get; set; }
+
         // Properties only relevent for C++
         public Dictionary<String, String> ClassToHeaderFileMap { get; set; }
 

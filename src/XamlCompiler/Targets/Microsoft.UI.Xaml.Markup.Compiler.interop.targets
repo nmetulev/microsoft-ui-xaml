@@ -79,7 +79,6 @@ Licensed under the MIT License. See LICENSE in the project root for license info
              Each element is passed verbatim to XamlOptionalChanges.EnableChange() or DisableChange(). -->
         <EnabledXamlOptionalChanges Condition="'$(EnabledXamlOptionalChanges)' == ''"></EnabledXamlOptionalChanges>
         <DisabledXamlOptionalChanges Condition="'$(DisabledXamlOptionalChanges)' == ''"></DisabledXamlOptionalChanges>
-        <EnableHotReloadStableConnectionIds Condition="'$(EnableHotReloadStableConnectionIds)' == ''">false</EnableHotReloadStableConnectionIds>
 
         <!-- XAML hot reload (replacing an app's markup while it runs, through the XAML diagnostics interface) is only
              allowed in apps carrying the hot reload stamp. Debug builds get it by default: the Debug configuration, or
@@ -87,6 +86,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
              EnableXamlHotReload to override either way. -->
         <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == '' AND ('$(Configuration)' == 'Debug' OR ('$(IsNativeLanguage)' != 'true' AND '$(Optimize)' != 'true') OR ('$(IsNativeLanguage)' == 'true' AND '$(UseDebugLibraries)' == 'true'))">true</EnableXamlHotReload>
         <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == ''">false</EnableXamlHotReload>
+        <!-- Hot reload builds keep connection IDs stable and append-only across compiles, so an edit doesn't renumber the generated members. -->
+        <EnableHotReloadStableConnectionIds Condition="'$(EnableHotReloadStableConnectionIds)' == ''">$(EnableXamlHotReload)</EnableHotReloadStableConnectionIds>
 
         <!-- Determine whether we are building for Win32 or UWP, while respecting any overrides..-->
 
@@ -439,6 +440,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+                EnableXamlHotReload="$(EnableXamlHotReload)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -493,6 +495,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
             EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+            EnableXamlHotReload="$(EnableXamlHotReload)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
             DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 
@@ -571,6 +574,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+                EnableXamlHotReload="$(EnableXamlHotReload)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -625,6 +629,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+                EnableXamlHotReload="$(EnableXamlHotReload)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 
@@ -751,6 +756,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+                EnableXamlHotReload="$(EnableXamlHotReload)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
                 DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
 
@@ -814,6 +820,7 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
             EnableHotReloadStableConnectionIds="$(EnableHotReloadStableConnectionIds)"
+            EnableXamlHotReload="$(EnableXamlHotReload)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
             DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
 
