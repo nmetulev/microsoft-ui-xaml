@@ -305,8 +305,12 @@ of the generated C# records the fields and nested types of each class, per gener
 back before the closing brace of its container:
 
 - A field keeps its declaration without its initializer (constants stay as they are).
-- A type keeps its header, fields and nested types. Its method, constructor and accessor bodies become
-  `{ throw null; }`, and expression bodies become `=> throw null;`.
+- A type keeps its header, fields and nested types. Its method, constructor and accessor bodies are inert, because
+  live objects created before the update can still call them: a list calls `IDataTemplateComponent.Recycle`,
+  `ProcessBindings` and `Update` on the old Bindings object of every container it recycles or reuses. Void members,
+  constructors and `set`/`add`/`remove` accessors get `{ }`. Other members get `return default;` (`=> default;` for
+  expression bodies), with `out` parameters assigned first: `nextPhase = -1` for `ProcessBindings` ("no more
+  phases"), `default` otherwise. An `int ProcessBindings` returns -1.
 - The block is wrapped in `#pragma warning disable` / `restore`, with a comment.
 - A live member with the same name always wins.
 - A build records the inventory but puts nothing back: it is the new baseline, and the app restarts from it.
@@ -315,7 +319,9 @@ The order of the restored members is deterministic (sorted by key).
 
 **Template Bindings classes.** A template's Bindings classes are named with a hash of their data type
 (`Page_obj20_Bindings_1a2b3c4d`), so an `x:DataType` change adds new classes instead of changing field types
-(ENC0009). The old classes become tombstones.
+(ENC0009). The old classes become tombstones. The `obj20` is the connection ID of the template's root element, so
+wrapping that root (for example a `TextBlock` into a `StackPanel`) also renames the class. The wrapped element keeps
+its own ID.
 
 ### 2. No redundant default initializers
 
@@ -481,7 +487,8 @@ WinUI Gallery, hot reload mode:
   `--typeinfo skip` and with `--typeinfo all`.
 - **Tombstone self-test** (`XamlCompilerServiceHost tombstones`): 388 generated files, 5309 recorded members. Each
   file is stripped of every field and nested type and restored from tombstones. The app compiles, and the
-  metadata-only image is the same size (928,768 bytes).
+  metadata-only image is the same size (928,768 bytes). The tombstones also compile on their own (no CS0161, CS0177,
+  CS0127, CS0126 or CS1622) and contain no `throw`: 291 files rebuilt from tombstones, 0 failures.
 - **C++ (Simple):** the fixed point is 38 of 38 identical.
 
 Normal builds (flags off) are unchanged: Gallery 777 of 777 and C++ 27 of 27 identical to the unmodified compiler's
