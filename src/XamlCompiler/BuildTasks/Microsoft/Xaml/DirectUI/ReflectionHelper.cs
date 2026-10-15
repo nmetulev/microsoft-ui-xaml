@@ -18,7 +18,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
         }
 
         // Drop cached attributes for members of one assembly (the project's own, before it is replaced).
-        internal static void Release(Assembly assembly)
+        // Not an overload of Release: the unit test proxies look methods up by name.
+        internal static void ReleaseAssembly(Assembly assembly)
         {
             string assemblyName = assembly.FullName;
             foreach (string key in _typeAttrs.Keys)
