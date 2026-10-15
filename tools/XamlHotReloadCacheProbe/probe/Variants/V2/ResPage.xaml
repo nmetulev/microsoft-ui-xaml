@@ -1,0 +1,30 @@
+<Page
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CacheProbe">
+    <Page.Resources>
+        <x:String x:Key="PageText">page-v2</x:String>
+        <x:String x:Key="OnlyV2">only-v2</x:String>
+        <DataTemplate x:Key="PageTemplate">
+            <TextBlock AutomationProperties.AutomationId="PageTemplateText" Text="ptmpl-v2" />
+        </DataTemplate>
+        <Style x:Key="DerivedTextStyle" TargetType="TextBlock" BasedOn="{StaticResource BaseTextStyle}" />
+    </Page.Resources>
+    <StackPanel>
+        <TextBlock AutomationProperties.AutomationId="PageMarker" Text="marker-v2" />
+        <TextBlock AutomationProperties.AutomationId="PageResource" Text="{StaticResource PageText}" />
+        <TextBlock AutomationProperties.AutomationId="StaticMerged" Text="{StaticResource MergedText}" />
+        <Grid RequestedTheme="Light" AutomationProperties.AutomationId="LightGrid">
+            <TextBlock AutomationProperties.AutomationId="ThemedLight" Text="{ThemeResource ThemedText}" />
+        </Grid>
+        <Grid RequestedTheme="Dark" AutomationProperties.AutomationId="DarkGrid">
+            <TextBlock AutomationProperties.AutomationId="ThemedDark" Text="{ThemeResource ThemedText}" />
+        </Grid>
+        <local:ImplicitProbe AutomationProperties.AutomationId="Implicit" />
+        <local:ProbeControl AutomationProperties.AutomationId="Templated" />
+        <TextBlock AutomationProperties.AutomationId="BasedOn" Style="{StaticResource DerivedTextStyle}" />
+        <ContentControl AutomationProperties.AutomationId="PageTemplateHost" Content="x" ContentTemplate="{StaticResource PageTemplate}" />
+        <ContentControl AutomationProperties.AutomationId="MergedTemplateHost" Content="x" ContentTemplate="{StaticResource MergedTemplate}" />
+        <TextBlock x:Name="DeferredText" x:Load="False" AutomationProperties.AutomationId="DeferredText" Text="deferred-v2" />
+    </StackPanel>
+</Page>

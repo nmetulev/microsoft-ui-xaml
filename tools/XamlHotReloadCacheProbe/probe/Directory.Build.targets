@@ -1,0 +1,7 @@
+<Project>
+  <!-- WinUI projects only: a source generator or other netstandard project next to the app takes no WinUI. -->
+  <ItemGroup Condition="'$(UseWinUI)' == 'true'">
+    <PackageReference Update="Microsoft.WindowsAppSDK" ExcludeAssets="all" />
+    <PackageReference Include="Microsoft.WindowsAppSDK.WinUI" Version="3.0.0-dev" />
+  </ItemGroup>
+</Project>
