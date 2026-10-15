@@ -624,9 +624,11 @@ _Check_return_ HRESULT XamlSchemaContext::GetXamlProperty(
 
     {
         const std::uint32_t typesRemoved = XamlTypeCacheGenerations::g_typesRemoved.load(std::memory_order_relaxed);
-        if (typesRemoved != m_fullyQualifiedPropertyGeneration)
+        const std::uint32_t typesChanged = XamlTypeCacheGenerations::g_typesChanged.load(std::memory_order_relaxed);
+        if (typesRemoved != m_fullyQualifiedPropertyGeneration || typesChanged != m_fullyQualifiedPropertyTypesChanged)
         {
             m_fullyQualifiedPropertyGeneration = typesRemoved;
+            m_fullyQualifiedPropertyTypesChanged = typesChanged;
             m_mapFullyQualifiedProperty.clear();
         }
 

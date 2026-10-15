@@ -174,5 +174,50 @@ IFACEMETHODIMP XamlDiagnostics::InvalidateTypeCaches()
     IFC_RETURN(EnsureEnabled());
     DirectUI::MetadataAPI::InvalidateUnresolvedTypeCache();
     XamlTypeCacheGenerations::g_typesAdded.fetch_add(1, std::memory_order_relaxed);
+    // Types that already resolved may have new members too: every resolved custom type is asked for again on its next
+    // member miss.
+    DirectUI::MetadataAPI::MarkCustomTypesChanged(nullptr, 0);
+    XamlTypeCacheGenerations::g_typesChanged.fetch_add(1, std::memory_order_relaxed);
+    return S_OK;
+}
+
+IFACEMETHODIMP XamlDiagnostics::InvalidateTypes(
+    UINT32 count,
+    _In_reads_(count) LPCWSTR* fullNames,
+    _Out_ UINT32* marked)
+{
+    if (marked == nullptr)
+    {
+        return E_POINTER;
+    }
+    *marked = 0;
+    IFC_RETURN(EnsureEnabled());
+    if (count > 0 && fullNames == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+
+    std::vector<xstring_ptr> names;
+    names.reserve(count);
+    for (UINT32 i = 0; i < count; ++i)
+    {
+        if (fullNames[i] == nullptr || fullNames[i][0] == L'\0')
+        {
+            return E_INVALIDARG;
+        }
+        xstring_ptr name;
+        IFC_RETURN(xstring_ptr::CloneBuffer(fullNames[i], &name));
+        names.push_back(std::move(name));
+    }
+    if (names.empty())
+    {
+        return S_OK;
+    }
+
+    *marked = static_cast<UINT32>(DirectUI::MetadataAPI::MarkCustomTypesChanged(names.data(), names.size()));
+    if (*marked > 0)
+    {
+        XamlTypeCacheGenerations::g_typesChanged.fetch_add(1, std::memory_order_relaxed);
+    }
     return S_OK;
 }

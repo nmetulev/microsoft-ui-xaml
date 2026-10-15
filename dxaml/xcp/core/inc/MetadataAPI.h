@@ -356,6 +356,17 @@ namespace DirectUI
 
         static XamlMetadataCacheInvalidationResult InvalidateUnresolvedTypeCache();
 
+        // Hot reload: the code of already-resolved custom types changed (new members). Marks them so the next member
+        // lookup that misses asks the metadata provider for the type again; the entries keep their identity, index and
+        // properties, so live objects, styles and bindings that hold them keep working. With no names, every resolved
+        // custom type is marked. Names are full names (as get_FullName returns them). Returns how many were marked.
+        static std::size_t MarkCustomTypesChanged(
+            _In_reads_opt_(count) const xstring_ptr* fullNames,
+            std::size_t count);
+
+        // Hot reload: when pType was marked changed, swaps in the metadata provider's current IXamlType for it.
+        static _Check_return_ HRESULT RefreshChangedCustomType(_In_ const CClassInfo* pType);
+
         // The current registry generation. Bumped by every successful registration, unregistration and invalidation,
         // so a caller can prove its change was observed.
         static XamlMetadataProviderGeneration GetMetadataProviderGeneration();

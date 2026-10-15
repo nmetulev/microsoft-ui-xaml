@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 // Metadata API. This is a process-wide API. Custom types may be resolved
@@ -1369,6 +1369,69 @@ XamlMetadataProviderGeneration MetadataAPI::GetMetadataProviderGeneration()
     return storage->m_sideMetadataProviders.GetGeneration();
 }
 
+std::size_t MetadataAPI::MarkCustomTypesChanged(
+    _In_reads_opt_(count) const xstring_ptr* fullNames,
+    std::size_t count)
+{
+    std::size_t marked = 0;
+    DynamicMetadataStorageInstanceWithLock storage;
+    for (const auto& type : storage->m_customTypesCache)
+    {
+        if (type->IsUnresolvedPlaceholder() || type->GetXamlTypeNoRef() == nullptr)
+        {
+            continue;
+        }
+        bool matches = (fullNames == nullptr);
+        for (std::size_t i = 0; !matches && i < count; ++i)
+        {
+            matches = fullNames[i].Equals(type->GetFullNameStorage());
+        }
+        if (matches)
+        {
+            type->MarkChanged();
+            ++marked;
+        }
+    }
+    return marked;
+}
+
+_Check_return_ HRESULT MetadataAPI::RefreshChangedCustomType(_In_ const CClassInfo* pType)
+{
+    auto customType = const_cast<CCustomClassInfo*>(pType->AsCustomType());
+    if (customType == nullptr || !customType->IsChanged())
+    {
+        return S_OK;
+    }
+
+    // Ask the providers for the type by name, exactly as its first resolution did (the application's provider first,
+    // then providers registered later). No new entry is made: this type keeps its index and its properties.
+    ctl::ComPtr<xaml_markup::IXamlType> current;
+    xruntime_string_ptr fullName;
+    IFC_RETURN(customType->GetFullNameStorage().Promote(&fullName));
+
+    ctl::ComPtr<xaml_markup::IXamlMetadataProvider> provider;
+    IFC_RETURN(TryGetMetadataProvider(&provider));
+    if (provider != nullptr)
+    {
+        IGNOREHR(provider->GetXamlTypeByFullName(fullName.GetHSTRING(), &current));
+    }
+    if (current == nullptr)
+    {
+        std::uint64_t claim = XamlMetadataProviderRegistry::c_invalidClaimId;
+        IGNOREHR(TryResolveThroughSideMetadataProviders(
+            customType->GetFullNameStorage(), false /* byTypeName */, wxaml_interop::TypeKind_Metadata, &current, &claim));
+    }
+
+    DynamicMetadataStorageInstanceWithLock storage;
+    // A provider that no longer knows the type leaves the entry as it was.
+    auto previous = customType->ReplaceXamlType(current.Get());
+    if (current != nullptr && previous != nullptr && previous.Get() != current.Get())
+    {
+        storage->m_retiredXamlTypes.push_back(std::move(previous));
+    }
+    return S_OK;
+}
+
 std::size_t MetadataAPI::GetSideMetadataProviderCount()
 {
     DynamicMetadataStorageInstanceWithLock storage;
@@ -1747,6 +1810,9 @@ _Check_return_ HRESULT MetadataAPI::TryImportPropertyInfoFromMetadataProvider(_I
     *ppProperty = nullptr;
 
     IFCEXPECT_RETURN(!pType->IsBuiltinType());
+
+    // Hot reload: a type whose code changed is asked for again, so members added to it are found.
+    IFC_RETURN(RefreshChangedCustomType(pType));
 
     // Make sure we were able to resolve this as a custom type.
     const CCustomClassInfo* customType = pType->AsCustomType();

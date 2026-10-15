@@ -47,7 +47,7 @@ class
         // interfaces that derive from base interfaces. The class only implements the first one, so this
         // should always be the most derived, but will still be able to QI for the other classes in the list.
         wrl::ChainInterfaces<IVisualTreeService3, IVisualTreeService2, IVisualTreeService>,
-        wrl::ChainInterfaces<IXamlHotReloadService2, IXamlHotReloadService>,
+        wrl::ChainInterfaces<IXamlHotReloadService3, IXamlHotReloadService2, IXamlHotReloadService>,
         IXamlDiagnosticsTestHooks,
         wrl::FtmBase>
 {
@@ -256,6 +256,10 @@ public:
         _In_z_ LPCWSTR uri,
         _Out_ UINT32* count,
         _Outptr_result_buffer_maybenull_(*count) IInspectable*** components) override;
+    IFACEMETHOD(InvalidateTypes)(
+        UINT32 count,
+        _In_reads_(count) LPCWSTR* fullNames,
+        _Out_ UINT32* marked) override;
 
     // IXamlDiagnosticsTestHooks Interface
     IFACEMETHOD(UnregisterInstance)(\

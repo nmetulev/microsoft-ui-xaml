@@ -346,6 +346,8 @@ private:
     // XamlTypeCacheGenerations::g_typesRemoved when m_mapFullyQualifiedProperty was filled. A change (a metadata
     // provider was unregistered) drops it, since its owner types may no longer resolve.
     std::uint32_t m_fullyQualifiedPropertyGeneration = 0;
+    // Same for XamlTypeCacheGenerations::g_typesChanged (hot reload): a property that didn't exist may exist now.
+    std::uint32_t m_fullyQualifiedPropertyTypesChanged = 0;
 
     // caches for UnknownTypes/Properties we create when a requested StableXbfIndex is
     // outside the range of indices known to this version of the framework
