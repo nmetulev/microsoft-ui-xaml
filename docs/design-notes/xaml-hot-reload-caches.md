@@ -40,8 +40,9 @@ tools\XamlHotReloadCacheProbe\run.ps1 -PackageSource <folder with Microsoft.Wind
 ## Results
 
 Baseline: the prototype package at c7cbf40ee. Fixed: this branch's runtime change (01bddb720) built into an integration
-package on top of c7cbf40ee (`C:\hr-shared\winui\int-01bddb720`). Both columns come from the same probe build, with the
-package cache isolated for each.
+package on top of c7cbf40ee (`C:\hr-shared\winui\int-01bddb720`). Rows marked int-15a03574f also include 60944dfad
+(`IXamlHotReloadService2` and the root-property clearing), merged with the compiler and metadata-provider branches.
+Both columns come from the same probe build, with the package cache isolated for each.
 
 | Scenario | What it does | Baseline text / binary | Fixed text / binary |
 |---|---|---|---|
@@ -50,8 +51,8 @@ package cache isolated for each.
 | negcache-swap | Look up a missing key, then swap in a dictionary that defines it (the not-found cache) | pass / pass | pass / pass |
 | generic | Replace `Themes/Generic.xaml`, then create a new templated control | pass / pass | pass / pass |
 | page-new | Replace a page's markup, then create a new instance (Page.Resources, DataTemplate, `x:Load`) | pass / pass | pass / pass |
-| page-reinit | Replace a page's markup, then run `InitializeComponent` again on the live instance | **STALE / STALE**: old Page.Resources and DataTemplate; new keys missing; root `Tag` stays | **STALE / STALE**: only the root `Tag` stays (open, see below) |
-| page-reinit-reset | Same, after the tool sets `Resources = new ResourceDictionary()` (what both agents do today) | **STALE / STALE**: root `Tag` | **STALE / STALE**: root `Tag` (open) |
+| page-reinit | Replace a page's markup, then run `InitializeComponent` again on the live instance | **STALE / STALE**: old Page.Resources and DataTemplate; new keys missing; root `Tag` stays | pass / pass (int-15a03574f) |
+| page-reinit-reset | Same, after the tool sets `Resources = new ResourceDictionary()` (what both agents do today) | **STALE / STALE**: root `Tag` | pass / pass (int-15a03574f) |
 | page-reinit-broken | Replaced markup fails to load; the live page must keep its resources | pass / **STALE**: an existing key is lost | pass / pass |
 | dict-reinit | A `ResourceDictionary` with `x:Class`, `InitializeComponent` run again | **ERROR** (duplicate key) / **STALE** (old value) | pass / pass |
 | loose | A `.xaml` file shipped as content (no `.xbf`), loaded by `Source`, replaced, then removed | pass / pass | pass / pass |
@@ -62,6 +63,9 @@ package cache isolated for each.
 | deferral | Count resources created by loading the replaced dictionary (clean build: 0) | **STALE**: 4 / pass: 0 | same (not changed, see below) |
 | merged-resetsource, resetsource-plain (control) | Set `Source` again on the app's merged dictionary | ERROR E_FAIL; `nodiag` too | same (existing behavior, see below) |
 | reinit-no-hotreload (control) | `InitializeComponent` twice with no hot reload: no markup replaced, no diagnostics | `nodiag`: loads twice, keeps `page-v1` | unchanged |
+| reload-pages, reload-offthread | `ReloadComponents` on two live pages, called on the UI thread or a background thread | E_NOINTERFACE (no `IXamlHotReloadService2`) | pass / pass: count 2, same instances, new markup, resources and template, root `Tag` cleared |
+| reload-broken | `ReloadComponents` with markup that fails, then fixed markup | E_NOINTERFACE | pass / pass: failure returned, count 0, old content, resources and `Tag` kept; the fix then loads |
+| reload-window | `ReloadComponents` on a second `Window` | E_NOINTERFACE | **STALE** (text: `Window.Title` can't be set from text, the same on the base package) / pass: count 1, new content and title |
 
 ## Inventory
 
@@ -216,6 +220,9 @@ same URI loads again on that thread.
 
 ## Not handled (proposals)
 
+- **`Window.Title` from text markup.** Loading text markup onto a live `Window` fails with "Failed to assign to property
+  'Microsoft.UI.Xaml.Window.Title'", with or without `x:Class`, on the base package too (reload-window, text). The
+  compiler's `.xbf` for the same markup loads fine. Only text-based reload (approach A) is affected.
 - **Text vs compiled resource deferral.** Compiled markup defers every keyed resource, ThemeDictionaries included,
   until it is looked up. Text markup creates them eagerly unless the dictionary has at least 128 nodes and only keyed
   items (`CResourceDictionary::ShouldDeferNodeStream`). *Measured*: deferral, where text creates 4 resources and
