@@ -17,7 +17,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     // that go with it. So the compiler service keeps every field and nested type that the generated code of a class has
     // declared since the last build: whatever a new compile no longer declares is put back as a tombstone. A field keeps
     // its declaration without its initializer; a type keeps its header, fields and nested types, and its method and
-    // accessor bodies become 'throw null;'. Nothing calls a tombstone: the code that used it is gone.
+    // accessor bodies become inert: they do nothing and return default (ProcessBindings: -1, no more phases). Objects
+    // created before the update still call them: a list recycles or reuses old containers through their template's
+    // retired Bindings class (IDataTemplateComponent.Recycle/ProcessBindings), and data sources raise events into
+    // handlers those objects subscribed.
     //
     // The inventory of declared members lives with the connection ID ledger (in the build's output folder), one file
     // per class and generated file. A build is a new baseline: it records what it generated and puts nothing back.
@@ -237,6 +240,152 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return shell.ToString();
         }
 
+        // The body of a retired member: it does nothing, assigns its out parameters and returns default.
+        // ProcessBindings (IDataTemplateComponent / IDataTemplateExtension) reports no more phases.
+        internal static string InertBody(string header)
+        {
+            string core = StripAttributes(header).Trim();
+            string accessor = AccessorKeyword(core);
+            if (accessor != null)
+            {
+                return accessor == "get" ? "{ return default; }" : "{ }";
+            }
+            int open = core.IndexOf('(');
+            if (open < 0)
+            {
+                return "{ return default; }";
+            }
+            string beforeParameters = core.Substring(0, open).TrimEnd();
+            string name = LastIdentifier(StripGenericArguments(beforeParameters));
+            string beforeName = beforeParameters.Substring(0, beforeParameters.LastIndexOf(name, StringComparison.Ordinal)).Trim();
+            string lastToken = beforeName.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            bool isVoid = lastToken == null || lastToken == "void" || s_modifiers.Contains(lastToken);
+
+            var body = new StringBuilder("{ ");
+            int close = MatchingParenthesis(core, open);
+            foreach (string parameter in SplitTopLevel(core.Substring(open + 1, Math.Max(0, close - open - 1))))
+            {
+                string[] tokens = parameter.Split(new[] { '=' }, 2)[0].Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                if (tokens.Length >= 2 && tokens.Contains("out"))
+                {
+                    string parameterName = tokens[tokens.Length - 1].TrimStart('@');
+                    body.Append(parameterName).Append(parameterName == "nextPhase" ? " = -1; " : " = default; ");
+                }
+            }
+            if (!isVoid)
+            {
+                body.Append(name == "ProcessBindings" && lastToken == "int" ? "return -1; " : "return default; ");
+            }
+            return body.Append('}').ToString();
+        }
+
+        private static readonly HashSet<string> s_modifiers = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "public", "private", "protected", "internal", "static", "override", "virtual", "sealed", "new", "async",
+            "extern", "unsafe", "partial", "readonly", "abstract",
+        };
+
+        private static bool IsMethodLike(string header)
+        {
+            return StripAttributes(header).IndexOf('(') >= 0;
+        }
+
+        private static bool IsAccessor(string header)
+        {
+            return AccessorKeyword(StripAttributes(header).Trim()) != null;
+        }
+
+        private static string AccessorKeyword(string core)
+        {
+            string last = core.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries).LastOrDefault();
+            return last == "get" || last == "set" || last == "init" || last == "add" || last == "remove" ? last : null;
+        }
+
+        private static string StripAttributes(string header)
+        {
+            var result = new StringBuilder();
+            int depth = 0;
+            foreach (char c in header)
+            {
+                if (c == '[' && depth == 0 && result.ToString().Trim().Length == 0)
+                {
+                    depth = 1;
+                    continue;
+                }
+                if (depth > 0)
+                {
+                    depth += c == '[' ? 1 : c == ']' ? -1 : 0;
+                    continue;
+                }
+                result.Append(c);
+            }
+            return result.ToString();
+        }
+
+        private static string StripGenericArguments(string text)
+        {
+            text = text.TrimEnd();
+            if (!text.EndsWith(">", StringComparison.Ordinal))
+            {
+                return text;
+            }
+            int depth = 0;
+            for (int i = text.Length - 1; i >= 0; i--)
+            {
+                depth += text[i] == '>' ? 1 : text[i] == '<' ? -1 : 0;
+                if (depth == 0)
+                {
+                    return text.Substring(0, i).TrimEnd();
+                }
+            }
+            return text;
+        }
+
+        private static string LastIdentifier(string text)
+        {
+            int end = text.Length;
+            int start = end;
+            while (start > 0 && (char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_' || text[start - 1] == '@'))
+            {
+                start--;
+            }
+            return text.Substring(start, end - start);
+        }
+
+        private static int MatchingParenthesis(string text, int open)
+        {
+            int depth = 0;
+            for (int i = open; i < text.Length; i++)
+            {
+                depth += text[i] == '(' ? 1 : text[i] == ')' ? -1 : 0;
+                if (depth == 0)
+                {
+                    return i;
+                }
+            }
+            return text.Length;
+        }
+
+        private static IEnumerable<string> SplitTopLevel(string parameters)
+        {
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                char c = parameters[i];
+                depth += c == '<' || c == '(' || c == '[' ? 1 : c == '>' || c == ')' || c == ']' ? -1 : 0;
+                if (c == ',' && depth == 0)
+                {
+                    yield return parameters.Substring(start, i - start);
+                    start = i + 1;
+                }
+            }
+            if (parameters.Trim().Length > 0)
+            {
+                yield return parameters.Substring(start);
+            }
+        }
+
         private static void AppendMemberShell(string code, CSharpDeclaration member, StringBuilder shell, ref int copied)
         {
             switch (member.Kind)
@@ -266,14 +415,17 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 case CSharpDeclarationKind.Body:
                     if (member.BodyOpen >= 0)
                     {
+                        string header = code.Substring(member.Start, member.BodyOpen - member.Start);
                         shell.Append(code, copied, member.BodyOpen - copied);
-                        shell.Append("{ throw null; }");
+                        shell.Append(InertBody(header));
                         copied = member.BodyClose + 1;
                     }
                     else if (member.ArrowStart >= 0)
                     {
+                        string header = code.Substring(member.Start, member.ArrowStart - member.Start);
                         shell.Append(code, copied, member.ArrowStart - copied);
-                        shell.Append("=> throw null;");
+                        // 'int P => x;' stays an expression body; a method's becomes a block.
+                        shell.Append(IsMethodLike(header) || IsAccessor(header) ? InertBody(header) : "=> default;");
                         copied = member.End;
                     }
                     break;

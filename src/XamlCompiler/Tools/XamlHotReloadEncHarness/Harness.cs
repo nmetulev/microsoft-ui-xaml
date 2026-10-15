@@ -515,12 +515,13 @@ internal sealed class Harness
         }
         string relative = path.Substring(_objDir.Length + 1);
         string file = Path.GetFileName(relative);
-        foreach (string suffix in new[] { ".g.i.cs", ".g.cs" })
+        // A hot reload build's csc.args already names pass 1 files *.i.g.cs.
+        foreach (string suffix in new[] { ".g.i.cs", ".i.g.cs", ".g.cs" })
         {
             if (file.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) && _xamlBaseNames.Contains(file[..^suffix.Length]))
             {
-                string mapped = Path.Combine(_outDir, relative);
-                return HotReloadCodeGen && suffix == ".g.i.cs" ? mapped[..^suffix.Length] + ".i.g.cs" : mapped;
+                string mapped = Path.Combine(_outDir, relative)[..^suffix.Length];
+                return mapped + (suffix == ".g.cs" ? ".g.cs" : HotReloadCodeGen ? ".i.g.cs" : ".g.i.cs");
             }
         }
         return arg;
@@ -592,6 +593,10 @@ internal sealed class Harness
         Compilation compilation = (await solution.GetProject(_projectId!)!.GetCompilationAsync())!;
         using var stream = new MemoryStream();
         EmitResult result = compilation.Emit(stream, options: new EmitOptions(metadataOnly: true, includePrivateMembers: true));
+        foreach (Diagnostic error in result.Diagnostics.Where(d => d.Severity == DiagnosticSeverity.Error).Take(5))
+        {
+            Console.WriteLine($"  emit: {error}");
+        }
         return result.Success ? stream.ToArray() : null;
     }
 

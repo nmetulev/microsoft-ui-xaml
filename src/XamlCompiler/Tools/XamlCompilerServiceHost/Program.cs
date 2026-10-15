@@ -593,6 +593,18 @@ internal static class Program
         return 0;
     }
 
+    private static readonly HashSet<string> s_tombstoneBodyErrors = new HashSet<string> { "CS0161", "CS0177", "CS0127", "CS0126", "CS1622" };
+
+    private static List<Diagnostic> TombstoneBodyErrors(string code)
+    {
+        SyntaxTree tree = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest));
+        var compilation = CSharpCompilation.Create("tombstones", new[] { tree }, new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        return tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Concat(compilation.GetDiagnostics().Where(d => s_tombstoneBodyErrors.Contains(d.Id)))
+            .ToList();
+    }
+
     private static int TombstoneSelfTest(string generatedDir, string outDir)
     {
         Type members = typeof(XamlCompilerService).Assembly.GetType("Microsoft.UI.Xaml.Markup.Compiler.HotReloadRetiredMembers", throwOnError: true);
@@ -620,6 +632,20 @@ internal static class Program
             {
                 failures++;
                 Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: no-op={unchanged == code}, keys {keys.Count} -> {keysAfter.Count}");
+            }
+
+            // The tombstones must compile: syntax, and the flow rules an inert body has to meet (every path returns, out
+            // parameters assigned, no value returned from void). Flow analysis runs without the WinUI references.
+            List<Diagnostic> bodyErrors = TombstoneBodyErrors(tombstoned);
+            if (bodyErrors.Count > 0)
+            {
+                failures++;
+                Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: {bodyErrors.Count} tombstone body error(s), first: {bodyErrors[0]}");
+            }
+            if (tombstoned.Contains("throw null", StringComparison.Ordinal))
+            {
+                failures++;
+                Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: a tombstone still throws");
             }
             files++;
             entries += keys.Count;

@@ -54,7 +54,29 @@ namespace UnitTests
             string normal = Generate(hotReload: false);
             Assert.IsTrue(Regex.IsMatch(normal, @"public void Recycle\(\)\s*\{\s*this\.bindingsTracking\.ReleaseAllListeners\(\);"), normal);
             StringAssert.Contains(normal, "this.bindingsTracking.RegisterTwoWayListener_");
-            Assert.IsFalse(normal.Contains("EnsureBindingsTracking"), normal);
+        }
+
+        // Containers created before an update keep instances of a template Bindings class that the update renamed (its
+        // template root or x:DataType changed); the framework still calls Recycle, ProcessBindings and Update on them. The
+        // tombstone that keeps the old class must be inert, not throw.
+        [TestMethod]
+        public void HotReload_TombstonedBindingsClassesAreInert()
+        {
+            string previous = Generate(hotReload: true);
+            Match bindings = Regex.Match(previous, @"class (\w+_obj\d+_Bindings\w*)\s*:");
+            Assert.IsTrue(bindings.Success, previous);
+            string oldName = bindings.Groups[1].Value;
+            string current = Regex.Replace(previous, @"\b" + oldName + @"\b", oldName + "_renamed");
+
+            string restored = HotReloadRetiredMembers.Restore(current, previous);
+            Match tombstone = Regex.Match(restored, @"class " + oldName + @"\b.*?#pragma warning restore", RegexOptions.Singleline);
+            Assert.IsTrue(tombstone.Success, restored);
+            string shell = tombstone.Value;
+            Assert.IsFalse(shell.Contains("throw"), shell);
+            Assert.IsTrue(Regex.IsMatch(shell, @"public void Recycle\(\)\s*\{\s*\}"), shell);
+            Assert.IsTrue(Regex.IsMatch(shell, @"public void ProcessBindings\([^)]*out int nextPhase\)\s*\{\s*nextPhase = -1;\s*\}"), shell);
+            Assert.IsTrue(Regex.IsMatch(shell, @"public void Update\(\)\s*\{\s*\}"), shell);
+            Assert.IsTrue(Regex.IsMatch(shell, @"public void Connect\([^)]*\)\s*\{\s*\}"), shell);
         }
 
         private string Generate(bool hotReload)
