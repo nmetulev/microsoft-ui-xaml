@@ -239,7 +239,9 @@ internal sealed class Harness
         ApplyGenerated(p2);
         if (p2.XamlTypeInfoMayBeStale)
         {
-            XamlCompileResult full = _service.CompilePass2(_service.AllXamlFiles, image, regenerateTypeInfo: true);
+            // Hot reload builds: the page alone with type info regenerated equals a full pass 2 (sorted tables), and the
+            // other pages' type information is replayed from the service's cache.
+            XamlCompileResult full = _service.CompilePass2(new[] { path }, image, regenerateTypeInfo: true);
             result.TypeInfoMs += full.Elapsed.TotalMilliseconds;
             if (!full.Success)
             {

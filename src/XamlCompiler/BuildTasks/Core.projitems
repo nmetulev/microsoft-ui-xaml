@@ -173,6 +173,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\ConnectionIdElement.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\HotReloadConnectionIdLedger.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\HotReloadRetiredMembers.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\PageTypeInfoCache.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\EventAssignment.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\FieldDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\LineNumberInfo.cs" />

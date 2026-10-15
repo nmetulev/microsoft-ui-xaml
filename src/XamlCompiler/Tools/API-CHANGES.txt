@@ -33,3 +33,9 @@ v3 (references reload)
     Success, ElapsedMs, Added, Removed, Released, FullReset; errors in Diagnostics.
   The host still needs a build (restore + reference resolution) to produce the new input.json; the service doesn't
   resolve packages.
+
+v3, unchanged API (per-page type info cache)
+  * Hot reload builds: CompilePass2([page], image, regenerateTypeInfo: true) is byte-identical to a full pass 2 and is
+    now the recommended response to XamlTypeInfoMayBeStale (Gallery p50 ~0.4 s; was ~0.8 s idle, 1.9 s loaded).
+    The other pages' type information is replayed from the service's per-page cache.
+    XAML_COMPILER_SERVICE_NO_TYPEINFO_CACHE=1 turns the cache off.

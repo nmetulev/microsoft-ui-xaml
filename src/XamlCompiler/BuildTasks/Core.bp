@@ -198,6 +198,7 @@ namespace XAMLCompiler.BuildTasks.Core {
         f`Microsoft/Xaml/XamlCompiler/ConnectionIdElement.cs`,
         f`Microsoft/Xaml/XamlCompiler/HotReloadConnectionIdLedger.cs`,
         f`Microsoft/Xaml/XamlCompiler/HotReloadRetiredMembers.cs`,
+        f`Microsoft/Xaml/XamlCompiler/PageTypeInfoCache.cs`,
         f`Microsoft/Xaml/XamlCompiler/EventAssignment.cs`,
         f`Microsoft/Xaml/XamlCompiler/FieldDefinition.cs`,
         f`Microsoft/Xaml/XamlCompiler/KnownStrings.cs`,
