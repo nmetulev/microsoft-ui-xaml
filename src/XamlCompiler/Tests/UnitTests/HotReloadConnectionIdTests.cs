@@ -123,8 +123,11 @@ namespace UnitTests
                 baseline.NamedIds["FirstButton"]);
         }
 
+        // Identical unnamed siblings are keyed by their position among same-type unnamed siblings, so an unchanged file
+        // keeps its connection IDs (and its rewritten markup and generated fields) on every compile. A renumbered x:Bind
+        // field is a rude edit for .NET hot reload.
         [TestMethod]
-        public void ExperimentalMode_FailsClosedForIdenticalUnnamedSiblings()
+        public void ExperimentalMode_KeysIdenticalUnnamedSiblingsByPosition()
         {
             string output = CreateTemporaryDirectory();
             string xaml = Page(
@@ -133,10 +136,15 @@ namespace UnitTests
 
             CompilationResult first = CompileExperimental(output, xaml);
             CompilationResult second = CompileExperimental(output, xaml);
+            CompilationResult third = CompileExperimental(output, xaml);
 
-            Assert.AreEqual(first.ConnectionIds.Count, second.ConnectionIds.Count);
-            Assert.AreEqual(2, Regex.Matches(second.Manifest, "\"identityStatus\":\"ambiguous\"").Count);
-            Assert.IsTrue(second.ConnectionIds.Min() > first.ConnectionIds.Max());
+            CollectionAssert.AreEqual(first.ConnectionIds, second.ConnectionIds);
+            CollectionAssert.AreEqual(first.ConnectionIds, third.ConnectionIds);
+            Assert.AreEqual(first.Rewritten, third.Rewritten);
+            Assert.AreEqual(second.Ledger, third.Ledger);
+            Assert.AreEqual(0, GetRetiredIds(third.Ledger).Count);
+            Assert.AreEqual(0, Regex.Matches(third.Manifest, "\"identityStatus\":\"ambiguous\"").Count);
+            Assert.AreEqual(2, Regex.Matches(third.Manifest, "\"identityKind\":\"indexed-structural\"").Count);
         }
 
         [TestMethod]
@@ -521,6 +529,7 @@ namespace UnitTests
             public List<int> HarvestOrderIds { get; private set; }
             public string Manifest { get; private set; }
             public string Ledger { get; private set; }
+            public string Rewritten { get; private set; }
 
             public static CompilationResult From(
                 IEnumerable<string> rewrittenFiles,
@@ -545,6 +554,7 @@ namespace UnitTests
                     HarvestOrderIds = harvestOrderIds.ToList(),
                     Manifest = manifest,
                     Ledger = ledger,
+                    Rewritten = rewritten,
                 };
             }
         }

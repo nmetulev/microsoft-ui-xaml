@@ -1239,7 +1239,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         {
                             classCodeInfo.PrepareHotReloadConnectionIdArtifacts();
                         }
-                        _hotReloadConnectionIdLedgerSession.Commit(removeStaleClasses: !IsServiceCompile);
+                        _hotReloadConnectionIdLedgerSession.CommitPublication(removeStaleClasses: !IsServiceCompile);
                         PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "hot reload connection ID ledger");
                     }
                 }
@@ -1526,7 +1526,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 return;
             }
             s_typeResolver?.RemoveAssemblyFromTypeNameMap(previous);
-            DirectUI.ReflectionHelper.Release(previous);
+            DirectUI.ReflectionHelper.ReleaseAssembly(previous);
             s_typeUniverse.UnloadAssembly(previous);
         }
 
@@ -1565,7 +1565,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             foreach (var f in stale)
             {
                 s_typeResolver?.RemoveAssemblyFromTypeNameMap(f.Value);
-                DirectUI.ReflectionHelper.Release(f.Value);
+                DirectUI.ReflectionHelper.ReleaseAssembly(f.Value);
                 s_typeUniverse.UnloadAssembly(f.Value);
                 released.Add(f.Key);
             }

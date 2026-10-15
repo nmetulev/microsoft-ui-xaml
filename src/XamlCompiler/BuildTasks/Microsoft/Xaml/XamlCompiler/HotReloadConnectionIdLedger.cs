@@ -94,12 +94,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public void Commit()
         {
-            Commit(removeStaleClasses: true);
+            CommitPublication(removeStaleClasses: true);
         }
 
         // removeStaleClasses: false when only some classes were compiled (the compiler service compiles single pages),
         // so the ledgers of the classes that weren't compiled are kept.
-        public void Commit(bool removeStaleClasses)
+        // Not an overload of Commit: the unit test proxies look methods up by name.
+        public void CommitPublication(bool removeStaleClasses)
         {
             ThrowIfDisposed();
             if (!this.publicationBegun)
