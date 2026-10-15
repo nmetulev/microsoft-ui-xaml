@@ -225,20 +225,30 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 // The build runs the compiler from the project folder and some inputs are relative to it.
                 Environment.CurrentDirectory = ProjectFolder;
 
-                var core = new CompileXamlInternal();
-                core.Log = log;
-                core.TaskFileService = new BuildTaskFileService(_pass2Inputs.LanguageSourceExtension);
-                core.PopulateFromCompilerInputs(CreateInputs(isPass1, localAssemblyPath, localAssemblyImage != null));
-                core.SaveState = _savedState;
-                core.ServiceXamlFilesToCompile = new HashSet<string>(
-                    xamlFiles.Select(f => Path.GetFullPath(Path.Combine(ProjectFolder, f))),
-                    StringComparer.OrdinalIgnoreCase);
-                core.ServiceCollectAllTypeInfo = regenerateTypeInfo;
-                core.ServiceLocalAssemblyImage = isPass1 ? null : localAssemblyImage;
-                core.ServiceWrittenFiles = result.GeneratedText;
-                core.ServiceHotReloadStateFolder = _buildOutputFolder;
+                CompileXamlInternal NewCore(IDictionary<string, string> writtenFiles, ILog coreLog)
+                {
+                    var c = new CompileXamlInternal();
+                    c.Log = coreLog;
+                    c.TaskFileService = new BuildTaskFileService(_pass2Inputs.LanguageSourceExtension);
+                    c.PopulateFromCompilerInputs(CreateInputs(isPass1, localAssemblyPath, localAssemblyImage != null));
+                    c.SaveState = _savedState;
+                    c.ServiceXamlFilesToCompile = new HashSet<string>(
+                        xamlFiles.Select(f => Path.GetFullPath(Path.Combine(ProjectFolder, f))),
+                        StringComparer.OrdinalIgnoreCase);
+                    c.ServiceCollectAllTypeInfo = regenerateTypeInfo;
+                    c.ServiceLocalAssemblyImage = isPass1 ? null : localAssemblyImage;
+                    c.ServiceWrittenFiles = writtenFiles;
+                    c.ServiceHotReloadStateFolder = _buildOutputFolder;
+                    return c;
+                }
+
+                var core = NewCore(result.GeneratedText, log);
 
                 result.Success = core.DoExecute();
+                if (result.Success && !isPass1 && regenerateTypeInfo && VerifyTypeInfo && core.TypeInfoPagesReplayed > 0)
+                {
+                    VerifyReplayedTypeInfo(result, NewCore);
+                }
                 if (result.Success)
                 {
                     core.UpdateSavedStateInMemory();
@@ -278,6 +288,53 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 result.Elapsed = total.Elapsed;
             }
             return result;
+        }
+
+        /// <summary>
+        /// A check for hosts' test runs. When true, a pass 2 that regenerates XamlTypeInfo and replays other pages' type
+        /// information from the service's per-page cache also collects every page again without the cache, and fails
+        /// (WMC9998, the full collection's XamlTypeInfo returned) if the two differ. About doubles that compile's time.
+        /// Default: the environment variable XAML_COMPILER_SERVICE_VERIFY_TYPEINFO=1.
+        /// </summary>
+        public static bool VerifyTypeInfo { get; set; } = Environment.GetEnvironmentVariable("XAML_COMPILER_SERVICE_VERIFY_TYPEINFO") == "1";
+
+        private static void VerifyReplayedTypeInfo(XamlCompileResult result, Func<IDictionary<string, string>, ILog, CompileXamlInternal> newCore)
+        {
+            Stopwatch clock = Stopwatch.StartNew();
+            var scratch = new XamlCompileResult();
+            CompileXamlInternal check = newCore(scratch.GeneratedText, new ServiceLog(scratch));
+            check.ServiceDisableTypeInfoCache = true;
+            bool ok = check.DoExecute();
+            string key = result.GeneratedText.Keys.FirstOrDefault(k => Path.GetFileName(k).StartsWith("XamlTypeInfo.", StringComparison.OrdinalIgnoreCase));
+            string replayed = key == null ? null : result.GeneratedText[key];
+            string collected = key != null && scratch.GeneratedText.TryGetValue(key, out string text) ? text : null;
+            result.Markers.Add(new XamlCompileMarker("type info check", ok && replayed == collected ? "identical" : "different", clock.Elapsed.TotalMilliseconds));
+            if (!ok)
+            {
+                result.Success = false;
+                result.Diagnostics.Add(new XamlCompileDiagnostic(true, "WMC9998", key, 0, 0,
+                    "XamlTypeInfo check: collecting every page without the type information cache failed: " +
+                    string.Join("; ", scratch.Diagnostics.Where(d => d.IsError).Take(3).Select(d => d.Code + " " + d.Message))));
+            }
+            else if (!string.Equals(replayed, collected, StringComparison.Ordinal))
+            {
+                string[] a = (replayed ?? string.Empty).Split('\n');
+                string[] b = (collected ?? string.Empty).Split('\n');
+                int line = 0;
+                while (line < a.Length && line < b.Length && a[line] == b[line])
+                {
+                    line++;
+                }
+                result.Success = false;
+                if (key != null && collected != null)
+                {
+                    result.GeneratedText[key] = collected;
+                }
+                result.Diagnostics.Add(new XamlCompileDiagnostic(true, "WMC9998", key, line + 1, 0,
+                    "XamlTypeInfo check: the XamlTypeInfo built from the per-page cache differs from collecting every page " +
+                    $"(line {line + 1}: '{(line < a.Length ? a[line].Trim() : "<end>")}' vs '{(line < b.Length ? b[line].Trim() : "<end>")}'). " +
+                    "The full collection's XamlTypeInfo is returned and on disk."));
+            }
         }
 
         // GeneratedXbfFiles lists every page's .xbf; return only the ones this compile produced.

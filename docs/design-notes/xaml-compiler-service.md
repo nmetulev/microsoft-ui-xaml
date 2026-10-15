@@ -389,6 +389,14 @@ Options considered:
     members).
   - Reference reloads clear the cache. Hot reload (C#) only, where the sorted tables make the order of the calls
     irrelevant. `XAML_COMPILER_SERVICE_NO_TYPEINFO_CACHE=1` turns it off.
+  - A page without a valid entry (never collected, cleared by a reload, added with `AddXamlPage`, or edited) is
+    collected, and every collection stores its entry again. The content hash is recomputed only when the file's
+    size or write time changed, so an edit that keeps both is missed (editors always change the write time).
+  - Check: `XamlCompilerService.VerifyTypeInfo` (`XAML_COMPILER_SERVICE_VERIFY_TYPEINFO=1`) collects every page
+    again after each replay and fails the compile (WMC9998) if XamlTypeInfo differs. The harness turns it on with
+    `--verify-build`. Journey `journeys\reload-typeinfo.json` (TodoBench) covers this: session-added pages, a reference
+    reload, then a page added with `AddXamlPage` and a type from the new reference, each regenerated per page and
+    identical to a full collection. A negative control (a page changed behind the cache) fails as expected.
   - Gallery, every page compiled one at a time with `regenerateTypeInfo: true`: 1522/1522 identical to a build.
     Button, ComboBox and ScrollViewer back to back, pass 2 with type info p50: 407 to 459 ms with the cache, 804 to
     866 ms without it.
