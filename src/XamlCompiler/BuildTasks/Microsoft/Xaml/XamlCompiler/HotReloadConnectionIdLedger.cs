@@ -33,7 +33,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         private HotReloadConnectionIdLedgerSession(string outputFolder, int lockTimeoutMilliseconds)
         {
-            this.ledgerDirectory = Path.Combine(outputFolder, "XamlHotReload");
+            this.ledgerDirectory = HotReloadStatePaths.GetFolder(outputFolder);
             Directory.CreateDirectory(this.ledgerDirectory);
             this.pendingMarkerPath = Path.Combine(
                 this.ledgerDirectory,
@@ -73,7 +73,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 string fileStem = CreateFileStem(className);
                 ledger = HotReloadConnectionIdLedger.Load(
-                    Path.Combine(this.ledgerDirectory, fileStem + ".xaml.connids.json"),
+                    Path.Combine(this.ledgerDirectory, fileStem + HotReloadStatePaths.LedgerExtension),
                     className);
                 this.ledgers.Add(className, ledger);
             }
@@ -127,7 +127,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public static bool Clean(string outputFolder)
         {
-            string ledgerDirectory = Path.Combine(Path.GetFullPath(outputFolder), "XamlHotReload");
+            string ledgerDirectory = HotReloadStatePaths.GetFolder(outputFolder);
             if (!Directory.Exists(ledgerDirectory))
             {
                 return false;
@@ -137,9 +137,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             using (HotReloadConnectionIdLedgerSession session =
                 new HotReloadConnectionIdLedgerSession(outputFolder, DefaultLockTimeoutMilliseconds))
             {
-                foreach (string path in Directory.GetFiles(ledgerDirectory, "*.xaml.connids.json")
-                    .Concat(Directory.GetFiles(ledgerDirectory, "*.xaml.hotreload.json"))
+                // The patterns also match the longer names that earlier compilers wrote (<Class>.<hash>.xaml.connids.json).
+                foreach (string path in Directory.GetFiles(ledgerDirectory, "*" + HotReloadStatePaths.LedgerExtension)
+                    .Concat(Directory.GetFiles(ledgerDirectory, "*" + HotReloadStatePaths.ManifestExtension))
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.members.json"))
+                    .Concat(Directory.GetFiles(ledgerDirectory, "*.tmp"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "connection-ids.pending"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "codegen.json")))
                 {
@@ -201,8 +203,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 this.ledgers.Values.SelectMany(
                     ledger => new[] { ledger.LedgerPath, ledger.ManifestPath }),
                 StringComparer.OrdinalIgnoreCase);
-            foreach (string path in Directory.GetFiles(this.ledgerDirectory, "*.xaml.connids.json")
-                .Concat(Directory.GetFiles(this.ledgerDirectory, "*.xaml.hotreload.json")))
+            foreach (string path in Directory.GetFiles(this.ledgerDirectory, "*" + HotReloadStatePaths.LedgerExtension)
+                .Concat(Directory.GetFiles(this.ledgerDirectory, "*" + HotReloadStatePaths.ManifestExtension)))
             {
                 if (!activePaths.Contains(path))
                 {
@@ -211,23 +213,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
         }
 
+        // Hash only: the class name would make the names (and the paths) as long as the class name.
         internal static string CreateFileStem(string className)
         {
-            string shortName = className;
-            int separator = className.LastIndexOf('.');
-            if (separator >= 0 && separator < className.Length - 1)
-            {
-                shortName = className.Substring(separator + 1);
-            }
-
-            char[] invalidCharacters = Path.GetInvalidFileNameChars();
-            StringBuilder safeName = new StringBuilder(shortName.Length);
-            foreach (char character in shortName)
-            {
-                safeName.Append(invalidCharacters.Contains(character) ? '_' : character);
-            }
-
-            return safeName + "." + HotReloadConnectionIdText.ComputeHash(className).Substring(0, 12);
+            return HotReloadConnectionIdText.ComputeHash(className).Substring(0, 12);
         }
 
         private void ThrowIfDisposed()
@@ -444,8 +433,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 structuralRevision);
             this.manifestPath = this.ledgerPath.Substring(
                 0,
-                this.ledgerPath.Length - ".xaml.connids.json".Length) +
-                ".xaml.hotreload.json";
+                this.ledgerPath.Length - HotReloadStatePaths.LedgerExtension.Length) +
+                HotReloadStatePaths.ManifestExtension;
             this.prepared = true;
         }
 
@@ -1160,9 +1149,16 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal static T Read<T>(string path)
         {
             DataContractJsonSerializer serializer = GetSerializer(typeof(T));
-            using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            try
             {
-                return (T)serializer.ReadObject(stream);
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    return (T)serializer.ReadObject(stream);
+                }
+            }
+            catch (Exception e) when (HotReloadStatePaths.IsPathTooLong(path, e))
+            {
+                throw HotReloadStatePaths.PathTooLong(path, e);
             }
         }
 
@@ -1174,89 +1170,161 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 GetSerializer(typeof(T)).WriteObject(buffer, value);
                 bytes = buffer.ToArray();
             }
-            // An artifact that hasn't changed isn't rewritten (most pages on a build, and most ledgers on a save).
-            if (File.Exists(path) && new FileInfo(path).Length == bytes.Length && File.ReadAllBytes(path).SequenceEqual(bytes))
-            {
-                return;
-            }
-
-            string directory = Path.GetDirectoryName(path);
-            Directory.CreateDirectory(directory);
-            string temporaryPath = path + "." +
-                Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) + "." +
-                Guid.NewGuid().ToString("N") + ".tmp";
-
-            try
-            {
-                using (FileStream stream = new FileStream(
-                    temporaryPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None))
-                {
-                    stream.Write(bytes, 0, bytes.Length);
-                    stream.Flush(flushToDisk: true);
-                }
-
-                if (File.Exists(path))
-                {
-                    File.Replace(temporaryPath, path, destinationBackupFileName: null);
-                }
-                else
-                {
-                    File.Move(temporaryPath, path);
-                }
-            }
-            finally
-            {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
-            }
+            WriteBytes(path, bytes);
         }
 
         internal static void WriteText(string path, string value)
         {
-            string directory = Path.GetDirectoryName(path);
-            Directory.CreateDirectory(directory);
-            string temporaryPath = path + "." +
-                Process.GetCurrentProcess().Id.ToString(CultureInfo.InvariantCulture) + "." +
-                Guid.NewGuid().ToString("N") + ".tmp";
+            WriteBytes(path, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false).GetBytes(value));
+        }
 
+        private static int s_temporaryFileCounter;
+
+        // Atomic: written to a temporary file in the same folder, then moved over the artifact. The temporary name is short
+        // (~<n>.tmp), so it is never longer than the artifact's own path.
+        private static void WriteBytes(string path, byte[] bytes)
+        {
             try
             {
-                using (FileStream stream = new FileStream(
-                    temporaryPath,
-                    FileMode.CreateNew,
-                    FileAccess.Write,
-                    FileShare.None))
-                using (StreamWriter writer = new StreamWriter(
-                    stream,
-                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+                // An artifact that hasn't changed isn't rewritten (most pages on a build, and most ledgers on a save).
+                if (File.Exists(path) && new FileInfo(path).Length == bytes.Length && File.ReadAllBytes(path).SequenceEqual(bytes))
                 {
-                    writer.Write(value);
-                    writer.Flush();
-                    stream.Flush(flushToDisk: true);
+                    return;
                 }
 
-                if (File.Exists(path))
+                string directory = Path.GetDirectoryName(path);
+                Directory.CreateDirectory(directory);
+                string temporaryPath = null;
+                FileStream stream = null;
+                for (int attempt = 0; stream == null; attempt++)
                 {
-                    File.Replace(temporaryPath, path, destinationBackupFileName: null);
+                    temporaryPath = Path.Combine(
+                        directory,
+                        "~" + Interlocked.Increment(ref s_temporaryFileCounter).ToString(CultureInfo.InvariantCulture) + ".tmp");
+                    try
+                    {
+                        stream = new FileStream(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                    }
+                    catch (IOException) when (attempt < 1000 && File.Exists(temporaryPath))
+                    {
+                        // Another writer's (or a crashed one's): try the next name.
+                    }
                 }
-                else
+
+                try
                 {
-                    File.Move(temporaryPath, path);
+                    using (stream)
+                    {
+                        stream.Write(bytes, 0, bytes.Length);
+                        stream.Flush(flushToDisk: true);
+                    }
+
+                    if (File.Exists(path))
+                    {
+                        File.Replace(temporaryPath, path, destinationBackupFileName: null);
+                    }
+                    else
+                    {
+                        File.Move(temporaryPath, path);
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(temporaryPath))
+                    {
+                        File.Delete(temporaryPath);
+                    }
                 }
             }
-            finally
+            catch (Exception e) when (HotReloadStatePaths.IsPathTooLong(path, e))
             {
-                if (File.Exists(temporaryPath))
-                {
-                    File.Delete(temporaryPath);
-                }
+                throw HotReloadStatePaths.PathTooLong(path, e);
             }
         }
+    }
+
+    // The folder where a project's hot reload state lives: <intermediate output>\XamlHotReload. Its files are named by a
+    // hash of the class name (at most 40 characters). When the folder is so deep that a full file path could pass
+    // Windows' 259-character limit (MAX_PATH), it is addressed with the \\?\ extended-length prefix: the .NET Framework
+    // compiler (XamlCompiler.exe) can't open longer paths otherwise, even with LongPathsEnabled.
+    internal static class HotReloadStatePaths
+    {
+        internal const string FolderName = "XamlHotReload";
+        internal const string LedgerExtension = ".connids.json";
+        internal const string ManifestExtension = ".hotreload.json";
+        internal const string MembersExtension = ".members.json";
+        internal const int MaxPath = 259;
+
+        // The longest name in the folder: <12 hex>.i.g.cs.members.json is 32 characters.
+        internal const int MaxFileNameLength = 40;
+
+        private const string ExtendedPrefix = @"\\?\";
+        private const string ExtendedUncPrefix = @"\\?\UNC\";
+
+        internal static string GetFolder(string stateFolder)
+        {
+            string folder = Path.Combine(Path.GetFullPath(stateFolder), FolderName);
+            return folder.Length + 1 + MaxFileNameLength > MaxPath ? ToExtendedLengthPath(folder) : folder;
+        }
+
+        internal static string ToExtendedLengthPath(string fullPath)
+        {
+            if (fullPath.StartsWith(ExtendedPrefix, StringComparison.Ordinal))
+            {
+                return fullPath;
+            }
+            if (fullPath.StartsWith(@"\\", StringComparison.Ordinal))
+            {
+                return ExtendedUncPrefix + fullPath.Substring(2);
+            }
+            return ExtendedPrefix + fullPath;
+        }
+
+        internal static string WithoutExtendedPrefix(string path)
+        {
+            if (path.StartsWith(ExtendedUncPrefix, StringComparison.Ordinal))
+            {
+                return @"\\" + path.Substring(ExtendedUncPrefix.Length);
+            }
+            return path.StartsWith(ExtendedPrefix, StringComparison.Ordinal) ? path.Substring(ExtendedPrefix.Length) : path;
+        }
+
+        // A long path that the runtime still couldn't open (for example with legacy path handling) surfaces as a missing
+        // folder or a too-long path.
+        internal static bool IsPathTooLong(string path, Exception e)
+        {
+            return (e is PathTooLongException || e is DirectoryNotFoundException) &&
+                WithoutExtendedPrefix(path).Length + 1 > MaxPath &&
+                !(e is HotReloadStatePathTooLongException);
+        }
+
+        internal static Exception PathTooLong(string path, Exception inner)
+        {
+            string plain = WithoutExtendedPrefix(path);
+            return new HotReloadStatePathTooLongException(
+                String.Format(
+                    CultureInfo.InvariantCulture,
+                    "XAML hot reload couldn't write its state file '{0}': the path is {1} characters, and this process can't use paths " +
+                    "longer than {2} (MAX_PATH). Move the project to a shorter folder, or shorten its intermediate output path " +
+                    "(BaseIntermediateOutputPath). {3}",
+                    plain,
+                    plain.Length,
+                    MaxPath,
+                    inner.Message),
+                plain,
+                inner);
+        }
+    }
+
+    internal sealed class HotReloadStatePathTooLongException : PathTooLongException
+    {
+        internal HotReloadStatePathTooLongException(string message, string path, Exception inner)
+            : base(message, inner)
+        {
+            this.StatePath = path;
+        }
+
+        internal string StatePath { get; }
     }
 
     internal static class HotReloadConnectionIdText

@@ -54,3 +54,12 @@ v4, behavior (no API change)
     ({"enableXamlHotReload":true|false}). A service compile (either pass) whose inputs differ fails with WMC9998 at that
     file instead of generating code the running build doesn't have. Typical cause: the host's input.json was written
     without EnableXamlHotReload (pass EnableXamlHotReload="$(EnableXamlHotReload)" to InputSerializer).
+
+v4, behavior (no API change): short state file names
+  * Files in <OutputPath>XamlHotReload are named by a 12-hex hash of the class name: <hash>.connids.json (ledger),
+    <hash>.hotreload.json (manifest), <hash><ext>.members.json (for example <hash>.i.g.cs.members.json). They were
+    <Class>.<hash>.xaml.connids.json etc.; a build deletes the old ledgers and manifests. Atomic writes go through ~<n>.tmp in the same
+    folder (was <file>.<pid>.<guid>.tmp, which passed MAX_PATH in deep projects: WMC9999 "Could not find a part of the
+    path"). When the folder itself is deep, it is addressed as \\?\<path>, so XamlCompiler.exe (.NET Framework) writes
+    beyond 260 characters. If a state path still can't be used, the error is WMC9998 naming the path, its length and
+    the limit, not an internal error. A build's state from an earlier compiler isn't read: rebuild after upgrading.

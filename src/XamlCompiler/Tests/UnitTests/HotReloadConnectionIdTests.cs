@@ -359,12 +359,12 @@ namespace UnitTests
                     .Replace("HotReloadTests.MainPage", "HotReloadTests.OtherPage"));
             Assert.AreEqual(
                 1,
-                Directory.GetFiles(sidecarDirectory, "*.xaml.connids.json").Length);
+                Directory.GetFiles(sidecarDirectory, "*.connids.json").Length);
             Assert.AreEqual(
                 1,
-                Directory.GetFiles(sidecarDirectory, "*.xaml.hotreload.json").Length);
+                Directory.GetFiles(sidecarDirectory, "*.hotreload.json").Length);
             StringAssert.Contains(
-                File.ReadAllText(Directory.GetFiles(sidecarDirectory, "*.xaml.hotreload.json").Single()),
+                File.ReadAllText(Directory.GetFiles(sidecarDirectory, "*.hotreload.json").Single()),
                 "HotReloadTests.OtherPage");
 
             HotReloadConnectionIdLedgerSession.Clean(output);
@@ -372,6 +372,43 @@ namespace UnitTests
                 0,
                 Directory.GetFiles(sidecarDirectory, "*.json").Length);
             Assert.IsFalse(File.Exists(Path.Combine(sidecarDirectory, "connection-ids.pending")));
+        }
+
+        // XamlCompiler.exe runs on .NET Framework, which can't open paths past MAX_PATH (259 characters) unless they carry
+        // the \\?\ prefix. The state files' names are short, and a deep XamlHotReload folder is addressed with the prefix.
+        // (The temporary files of earlier compilers, <Class>.<hash>.xaml.connids.json.<pid>.<guid>.tmp, would be ~300 here.)
+        [TestMethod]
+        public void ExperimentalMode_WritesStateInDeepOutputFolders()
+        {
+            string output = CreateTemporaryDirectory();
+            while (output.Length < 212)
+            {
+                output = Path.Combine(output, "deep");
+            }
+            Directory.CreateDirectory(output);
+            string sidecarDirectory = Path.Combine(output, "XamlHotReload");
+            Assert.IsTrue(sidecarDirectory.Length > 218, sidecarDirectory);
+
+            CompilationResult first = CompileExperimental(
+                output,
+                Page("<Button x:Name='FirstButton' Click='OnClick' />", "<TextBlock x:Name='Label' />"));
+            CompilationResult second = CompileExperimental(
+                output,
+                Page("<TextBlock x:Name='Label' />", "<Button x:Name='FirstButton' Click='OnClick' />"));
+            AssertExistingIdsEqual(first, second);
+            Assert.AreEqual(GetLineage(first.Manifest), GetLineage(second.Manifest));
+
+            string[] files = Directory.GetFiles(sidecarDirectory);
+            Assert.AreEqual(0, files.Count(f => f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)), String.Join("\n", files));
+            foreach (string file in files)
+            {
+                Assert.IsTrue(Path.GetFileName(file).Length <= 40, file);
+            }
+            Assert.AreEqual(1, Directory.GetFiles(sidecarDirectory, "*.connids.json").Length);
+            Assert.AreEqual(1, Directory.GetFiles(sidecarDirectory, "*.hotreload.json").Length);
+
+            HotReloadConnectionIdLedgerSession.Clean(output);
+            Assert.AreEqual(0, Directory.GetFiles(sidecarDirectory, "*.json").Length);
         }
 
         [TestMethod]
@@ -488,11 +525,11 @@ namespace UnitTests
             string manifest = File.ReadAllText(
                 Directory.GetFiles(
                     Path.Combine(output, "XamlHotReload"),
-                    "*.xaml.hotreload.json").Single());
+                    "*.hotreload.json").Single());
             string ledger = File.ReadAllText(
                 Directory.GetFiles(
                     Path.Combine(output, "XamlHotReload"),
-                    "*.xaml.connids.json").Single());
+                    "*.connids.json").Single());
             return CompilationResult.From(
                 rewrittenFiles,
                 harvestOrderIds,

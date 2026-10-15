@@ -27,8 +27,6 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     // A live member with the same name always wins over a tombstone (a changed field type is a real rude edit).
     internal static class HotReloadRetiredMembers
     {
-        private const string FolderName = "XamlHotReload";
-
         internal static string Apply(string stateFolder, string className, string generatedFileExtension, string generatedCode, bool restoreRetiredMembers)
         {
             string inventoryPath = GetInventoryPath(stateFolder, className, generatedFileExtension);
@@ -52,8 +50,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         internal static string GetInventoryPath(string stateFolder, string className, string generatedFileExtension)
         {
-            return Path.Combine(Path.GetFullPath(stateFolder), FolderName,
-                HotReloadConnectionIdLedgerSession.CreateFileStem(className) + generatedFileExtension + ".members.json");
+            return Path.Combine(HotReloadStatePaths.GetFolder(stateFolder),
+                HotReloadConnectionIdLedgerSession.CreateFileStem(className) + generatedFileExtension + HotReloadStatePaths.MembersExtension);
         }
 
         // For tests: the code without any of the members an inventory keeps (every field and nested type of every type),
