@@ -127,6 +127,8 @@ internal sealed class Runner
             case "resetsource-plain": await ResetSourcePlain(); break;
             case "implicit-code-swap": await ImplicitCodeSwap(); break;
             case "dict-reinit": await DictReinit(); break;
+            case "asb-release": await AsbRelease(retemplate: false); break;
+            case "asb-retemplate-release": await AsbRelease(retemplate: true); break;
             case "type-member-added": await TypeMemberAdded(targeted: false); break;
             case "type-member-added-targeted": await TypeMemberAdded(targeted: true); break;
             case "reload-pages": await ReloadPages(offThread: false); break;
@@ -354,6 +356,73 @@ internal sealed class Runner
             }
             Marshal.Release(service3);
         }
+    }
+
+    // An AutoSuggestBox released right after its text changed: its TextChanged timer still runs and must not call back
+    // into the freed control. retemplate applies a template again first (as replacing app resources does), which used
+    // to leave an earlier Tick handler on the timer that the control never detached.
+    private async Task AsbRelease(bool retemplate)
+    {
+        const int rounds = 20;
+        var raised = 0;
+        for (var i = 0; i < rounds; i++)
+        {
+            CreateAndReleaseAsb(retemplate, i, () => raised++);
+            for (var g = 0; g < 3; g++)
+            {
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+            await Task.Delay(30);
+        }
+        Log($"NOTE released {rounds} AutoSuggestBoxes with a pending TextChanged{(retemplate ? " after a second template" : "")}");
+        // Well past the TextChanged timer interval: ticks for every released box have come and gone.
+        for (var w = 0; w < 10; w++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            await Task.Delay(100);
+        }
+        Note("TextChanged raised for released boxes", raised);
+
+        // A box that stays in the tree still raises TextChanged after its template was applied again.
+        var live = new AutoSuggestBox();
+        var liveRaised = 0;
+        live.TextChanged += (_, _) => liveRaised++;
+        _window.NewHost.Content = live;
+        await Settle();
+        if (retemplate)
+        {
+            ReapplyTemplate(live);
+        }
+        live.Text = "still works";
+        await Task.Delay(800);
+        Check("a live box still raises TextChanged", liveRaised > 0, "True");
+        Check("process alive after the timers ticked", true, "True");
+    }
+
+    private void CreateAndReleaseAsb(bool retemplate, int i, Action onTextChanged)
+    {
+        var box = new AutoSuggestBox();
+        box.TextChanged += (_, _) => onTextChanged();
+        _window.OldHost.Content = box;
+        box.UpdateLayout();
+        if (retemplate)
+        {
+            ReapplyTemplate(box);
+        }
+        box.Text = "typed " + i;
+        _window.OldHost.Content = null;
+    }
+
+    private static void ReapplyTemplate(Control control)
+    {
+        var template = control.Template;
+        control.Template = null;
+        control.UpdateLayout();
+        control.Template = template;
+        control.ApplyTemplate();
+        control.UpdateLayout();
     }
 
     // A ResourceDictionary with x:Class (its own InitializeComponent) re-initialized with replaced markup.
