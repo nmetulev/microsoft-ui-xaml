@@ -45,6 +45,7 @@
       <DependentUpon>CSharpPagePass1.tt</DependentUpon>
     </Compile>
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass2.HotReload.cs" />
+    <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CppWinRT\CppWinRT_PagePass2.HotReload.cs" />
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpTypeInfoPass2.HotReload.cs" />
     <Compile Include="$(BuildTasksDir)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpPagePass2.cs">
       <AutoGen>True</AutoGen>

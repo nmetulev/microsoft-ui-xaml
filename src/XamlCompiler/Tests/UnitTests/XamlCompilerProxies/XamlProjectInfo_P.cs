@@ -22,6 +22,8 @@ namespace Win8Xaml.CompilerProxies
         static PropertyInfo _genXbfArm64Path;
         static PropertyInfo _targetPlatformMinVersion;
         static PropertyInfo _codeGenFlagsProperty;
+        static PropertyInfo _isHotReloadBuildProperty;
+        static PropertyInfo _isCppHotReloadCodeGenProperty;
 
         object _instance;
 
@@ -37,6 +39,8 @@ namespace Win8Xaml.CompilerProxies
             _genXbfArm64Path = _xamlProjectInfoType.GetProperty("GenXbfArm64Path");
             _targetPlatformMinVersion = _xamlProjectInfoType.GetProperty("TargetPlatformMinVersion");
             _codeGenFlagsProperty = _xamlProjectInfoType.GetProperty("CodeGenFlags");
+            _isHotReloadBuildProperty = _xamlProjectInfoType.GetProperty("IsHotReloadBuild");
+            _isCppHotReloadCodeGenProperty = _xamlProjectInfoType.GetProperty("IsCppHotReloadCodeGen");
         }
 
         public XamlProjectInfo()
@@ -94,6 +98,18 @@ namespace Win8Xaml.CompilerProxies
         {
             get { return (bool)_isLibraryProperty.GetValue(_instance, null); }
             set { _isLibraryProperty.SetValue(_instance, value); }
+        }
+
+        public bool IsHotReloadBuild
+        {
+            get { return (bool)_isHotReloadBuildProperty.GetValue(_instance, null); }
+            set { _isHotReloadBuildProperty.SetValue(_instance, value); }
+        }
+
+        public bool IsCppHotReloadCodeGen
+        {
+            get { return (bool)_isCppHotReloadCodeGenProperty.GetValue(_instance, null); }
+            set { _isCppHotReloadCodeGenProperty.SetValue(_instance, value); }
         }
 
         public void SetCodeGenFlags(string flags)

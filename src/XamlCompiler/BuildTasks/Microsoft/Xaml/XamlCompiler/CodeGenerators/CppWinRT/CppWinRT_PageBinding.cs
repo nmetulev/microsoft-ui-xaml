@@ -67,7 +67,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             this.Write("            case ");
             this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
             this.Write(": // ");
-            this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
             this.Write("\r\n                {\r\n");
                if (element.Type.IsDerivedFromControlTemplate())
                {
@@ -91,7 +91,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             this.Write("                case ");
             this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
             this.Write(": // ");
-            this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
             this.Write("\r\n                    {\r\n");
               if (bindUniverse.BoundElements.Contains(element)) { 
               Output_ApiInformationCall_Push(element.ApiInformation, Indent.OneTab); 
@@ -108,7 +108,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             this.Write("                            ");
             this.Write(this.ToStringHelper.ToStringWithCulture(element.ObjectCodeName));
             this.Write(" = nullptr;\r\n                        }\r\n");
-              foreach (var childElem in element.Children.Where(c => bindUniverse.ElementsWithDisconnectCase.Contains(c))) {
+              foreach (var childElem in InIdOrder(element.Children.Where(c => bindUniverse.ElementsWithDisconnectCase.Contains(c)))) {
             this.Write("                        DisconnectUnloadedObject(");
             this.Write(this.ToStringHelper.ToStringWithCulture(childElem.ConnectionId));
             this.Write(");\r\n");
@@ -132,11 +132,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
   if (bindUniverse.ElementsWithBoundLoadAssignments.Any()) { 
             this.Write("\r\n        void UpdateUnloadedElement(int connectionId)\r\n        {\r\n            sw" +
                     "itch (connectionId)\r\n            {\r\n");
-      foreach (var element in bindUniverse.ElementsWithBoundLoadAssignments) { 
+      foreach (var element in InIdOrder(bindUniverse.ElementsWithBoundLoadAssignments)) { 
             this.Write("            case ");
             this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
             this.Write(": // ");
-            this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+            this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
             this.Write("\r\n                {\r\n");
           foreach (var ba in element.BindAssignments.OfType<BoundLoadAssignment>()) { 
               PushIndent(Indent.TwoTabs); 
@@ -263,7 +263,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
   if (bindUniverse.BoundElements != null && bindUniverse.BoundElements.Any()) { 
             this.Write("        // Fields for each control that has bindings.\r\n");
   }
-  foreach (ConnectionIdElement bindElement in bindUniverse.BoundElements) { 
+  foreach (ConnectionIdElement bindElement in InIdOrder(bindUniverse.BoundElements)) { 
       if (bindElement.IsWeakRef) { 
             this.Write("        ::winrt::weak_ref<");
             this.Write(this.ToStringHelper.ToStringWithCulture(bindElement.Type));
@@ -319,7 +319,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
       }
             this.Write("\r\n        // Update methods for each path node used in binding steps.\r\n");
   }
-  foreach (var bindStep in bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true)) { 
+  foreach (var bindStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true))) { 
             this.Write("\r\n");
       if (bindStep is FunctionStep) { 
             this.Write("        void Update_");
@@ -349,7 +349,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
       }
             this.Write("        }\r\n");
   }
-  foreach (BindPathStep bindStep in bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true)) { 
+  foreach (BindPathStep bindStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true))) { 
       if (bindStep.Parent != null && bindStep.BindStatus.HasFlag(BindStatus.HasFallbackValue)) { 
             this.Write("\r\n        void UpdateFallback_");
             this.Write(this.ToStringHelper.ToStringWithCulture(bindStep.CodeName));
@@ -1092,7 +1092,7 @@ this.Write(", this, std::placeholders::_1);\r\n");
      var element = ba.ConnectionIdElement;
 this.Write("            // ");
 
-this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
 
 this.Write("\r\n");
 
@@ -1460,7 +1460,7 @@ this.Write("        }\r\n");
 this.Write("        std::map<::std::wstring, std::function<void (int)>> PendingFunctionBindin" +
         "gs;\r\n\r\n");
 
-     foreach (FunctionStep functionStep in bindUniverse.BindPathSteps.Values.Where(s => s is FunctionStep))
+     foreach (FunctionStep functionStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(s => s is FunctionStep)))
      {
 this.Write("\r\n        void Invoke_");
 
@@ -1586,7 +1586,7 @@ this.Write("        }\r\n");
  }
  private void Output_TryGetValueFunctions(BindUniverse bindUniverse)
  {
-     foreach (BindPathStep step in bindUniverse.TryGetValueSteps)
+     foreach (BindPathStep step in InDeclarationOrder(bindUniverse.TryGetValueSteps))
      {
 this.Write("\r\n        bool ");
 
@@ -1717,7 +1717,7 @@ this.Write("        }\r\n");
  private void Output_BindingSetters(BindUniverse bu)
 {
     var distinctAsignmentsByMember = from ba in bu.BindAssignments.Where(ba => ba.HasSetValueHelper) group ba by ba.MemberFullName;
-    foreach (var item in distinctAsignmentsByMember) {
+    foreach (var item in InKeyOrder(distinctAsignmentsByMember)) {
         Output_BindingSetValueFunction(item.First());
     }
 }

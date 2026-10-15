@@ -32,7 +32,7 @@
             switch(connectionId)
             {
 <# foreach (var element in bindUniverse.ElementsWithConnectCase) { #>
-            case <#=element.ConnectionId#>: // <#=element.LineNumberAndXamlFile#>
+            case <#=element.ConnectionId#>: // <#=SourceComment(element)#>
                 {
 <#               if (element.Type.IsDerivedFromControlTemplate())#>
 <#               {#>
@@ -56,7 +56,7 @@
             switch (connectionId)
             {
 <#          foreach (var element in bindUniverse.ElementsWithDisconnectCase) { #>
-                case <#=element.ConnectionId#>: // <#=element.LineNumberAndXamlFile#>
+                case <#=element.ConnectionId#>: // <#=SourceComment(element)#>
                     {
 <#              if (bindUniverse.BoundElements.Contains(element)) { #>
 <#              Output_ApiInformationCall_Push(element.ApiInformation, Indent.OneTab); #>
@@ -67,7 +67,7 @@
 <#              }#>
                             <#=element.ObjectCodeName#> = nullptr;
                         }
-<#              foreach (var childElem in element.Children.Where(c => bindUniverse.ElementsWithDisconnectCase.Contains(c))) {#>
+<#              foreach (var childElem in InIdOrder(element.Children.Where(c => bindUniverse.ElementsWithDisconnectCase.Contains(c)))) {#>
                         DisconnectUnloadedObject(<#=childElem.ConnectionId#>);
 <#              }#>
 <#              Output_ApiInformationCall_Pop(element.ApiInformation, Indent.OneTab); #>
@@ -94,8 +94,8 @@
         {
             switch (connectionId)
             {
-<#      foreach (var element in bindUniverse.ElementsWithBoundLoadAssignments) { #>
-            case <#=element.ConnectionId#>: // <#=element.LineNumberAndXamlFile#>
+<#      foreach (var element in InIdOrder(bindUniverse.ElementsWithBoundLoadAssignments)) { #>
+            case <#=element.ConnectionId#>: // <#=SourceComment(element)#>
                 {
 <#          foreach (var ba in element.BindAssignments.OfType<BoundLoadAssignment>()) { #>
 <#              PushIndent(Indent.TwoTabs); #>
@@ -220,7 +220,7 @@
 <#  if (bindUniverse.BoundElements != null && bindUniverse.BoundElements.Any()) { #>
         // Fields for each control that has bindings.
 <#  }#>
-<#  foreach (ConnectionIdElement bindElement in bindUniverse.BoundElements) { #>
+<#  foreach (ConnectionIdElement bindElement in InIdOrder(bindUniverse.BoundElements)) { #>
 <#      if (bindElement.IsWeakRef) { #>
         ::winrt::weak_ref<<#=bindElement.Type#>> <#=bindElement.ObjectCodeName#>;
 <#      } else if (!bindElement.Type.IsDerivedFromControlTemplate()) { #>
@@ -260,7 +260,7 @@
 
         // Update methods for each path node used in binding steps.
 <#  }#>
-<#  foreach (var bindStep in bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true)) { #>
+<#  foreach (var bindStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true))) { #>
 
 <#      if (bindStep is FunctionStep) { #>
         void Update_<#=bindStep.CodeName#>(int32_t phase)
@@ -284,7 +284,7 @@
 <#      }#>
         }
 <#  }#>
-<#  foreach (BindPathStep bindStep in bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true)) { #>
+<#  foreach (BindPathStep bindStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(bindStep => bindStep.IsIncludedInUpdate == true))) { #>
 <#      if (bindStep.Parent != null && bindStep.BindStatus.HasFlag(BindStatus.HasFallbackValue)) { #>
 
         void UpdateFallback_<#=bindStep.CodeName#>(int phase)
@@ -758,7 +758,7 @@
 <#+ private void Output_Binding_SetValue_Non_Function_Call(BindAssignment ba, String value, bool includeDeferredSet)#>
 <#+ {#>
 <#+     var element = ba.ConnectionIdElement;#>
-            // <#=element.LineNumberAndXamlFile#>
+            // <#=SourceComment(element)#>
 <#+     Output_ApiInformationCall_Push(ba.ApiInformation, Indent.OneTab); #>
 <#+     if (ba is BoundLoadAssignment) { #>
 <#+         if (includeDeferredSet) { #>
@@ -974,7 +974,7 @@
 <#+ {#>
         std::map<::std::wstring, std::function<void (int)>> PendingFunctionBindings;
 
-<#+     foreach (FunctionStep functionStep in bindUniverse.BindPathSteps.Values.Where(s => s is FunctionStep))#>
+<#+     foreach (FunctionStep functionStep in InDeclarationOrder(bindUniverse.BindPathSteps.Values.Where(s => s is FunctionStep)))#>
 <#+     {#>
 
         void Invoke_<#=functionStep.CodeName#>(int phase)
@@ -1012,7 +1012,7 @@
 
 <#+ private void Output_TryGetValueFunctions(BindUniverse bindUniverse)#>
 <#+ {#>
-<#+     foreach (BindPathStep step in bindUniverse.TryGetValueSteps)#>
+<#+     foreach (BindPathStep step in InDeclarationOrder(bindUniverse.TryGetValueSteps))#>
 <#+     {#>
 
         bool <#=step.TryGetValueCodeName#>(<#=step.ValueType#>& val)
@@ -1074,7 +1074,7 @@
 <#+ private void Output_BindingSetters(BindUniverse bu)
 {
     var distinctAsignmentsByMember = from ba in bu.BindAssignments.Where(ba => ba.HasSetValueHelper) group ba by ba.MemberFullName;
-    foreach (var item in distinctAsignmentsByMember) {
+    foreach (var item in InKeyOrder(distinctAsignmentsByMember)) {
         Output_BindingSetValueFunction(item.First());
     }
 }#>

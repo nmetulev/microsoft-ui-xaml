@@ -57,9 +57,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
                     "expr bool is_type_complete_v = false;\r\n\r\n        template<typename T>\r\n        c" +
                     "onstexpr bool is_type_complete_v<T, std::void_t<decltype(sizeof(T))>> = true;\r\n\r" +
                     "\n");
-          foreach (var bindUniverse in Model.CodeInfo.BindUniverses) { 
+          foreach (var bindUniverse in InIdOrder(Model.CodeInfo.BindUniverses)) { 
               var distinctAsignmentsByMember = from ba in bindUniverse.BindAssignments.Where(ba => ba.HasSetValueHelper) group ba by ba.MemberFullName; 
-              foreach (var item in distinctAsignmentsByMember) { 
+              foreach (var item in InKeyOrder(distinctAsignmentsByMember)) { 
                   Output_StaticAssertTypeIsComplete(item.First().MemberType, Indent.TwoTabs); 
                   Output_StaticAssertTypeIsComplete(item.First().MemberDeclaringType, Indent.TwoTabs); 
               } 
@@ -111,7 +111,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
       Output_EmptyGetBindingConnectorMethod(); 
  } 
   if (Model.CodeInfo.IsUsingCompiledBinding) { 
-      foreach (BindUniverse bindUniverse in Model.CodeInfo.BindUniverses) { 
+      foreach (BindUniverse bindUniverse in InIdOrder(Model.CodeInfo.BindUniverses)) { 
           if (bindUniverse.NeedsCppBindingTrackingClass) { 
             this.Write("\r\n");
           IncludeTemplate<CppWinRT_PageBindingTracking>(Model, bindUniverse); 
@@ -211,7 +211,7 @@ this.Write("T<D, I...>::Connect(int32_t connectionId, IInspectable const& target
          if(Model.ConnectableElements.Any()) { 
 this.Write("        switch (connectionId)\r\n        {\r\n");
 
-             foreach (var element in Model.ConnectableElements) { 
+             foreach (var element in InIdOrder(Model.ConnectableElements)) { 
 this.Write("        case ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
@@ -261,10 +261,10 @@ this.Write(this.ToStringHelper.ToStringWithCulture(Model.CodeInfo.ClassName.Shor
 this.Write("T<D, I...>::UnloadObject(DependencyObject const& unloadableObject)\r\n    {\r\n      " +
         "  if (unloadableObject)\r\n        {\r\n");
 
-         foreach (var element in Model.UnloadableFields) { 
+         foreach (var element in InIdOrder(Model.UnloadableFields)) { 
 this.Write("            // ");
 
-this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
 
 this.Write("\r\n");
 
@@ -293,7 +293,7 @@ this.Write(this.ToStringHelper.ToStringWithCulture(Model.CodeInfo.ClassName.Shor
 this.Write("T<D, I...>::DisconnectUnloadedObject(int32_t connectionId)\r\n    {\r\n        switch" +
         "(connectionId)\r\n        {\r\n");
 
-         foreach (var element in Model.DeferrableElements)
+         foreach (var element in InIdOrder(Model.DeferrableElements))
          {
 this.Write("            case ");
 
@@ -301,11 +301,11 @@ this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
 
 this.Write(": // ");
 
-this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
 
 this.Write("\r\n            {\r\n");
 
-             foreach (var childElem in element.Children) 
+             foreach (var childElem in InIdOrder(element.Children)) 
              {
                  if (childElem.HasFieldDefinition) 
                  {
@@ -428,7 +428,7 @@ this.Write(this.ToStringHelper.ToStringWithCulture(Projection(ProjectInfo.RootNa
 this.Write("::implementation::XamlBindings> bindings;\r\n        switch (connectionId)\r\n       " +
         " {\r\n");
 
-     foreach (var element in Model.AllConnectionIdElements) { 
+     foreach (var element in InIdOrder(Model.AllConnectionIdElements)) { 
          if (element.IsBindingRoot) { 
 this.Write("            case ");
 
@@ -436,7 +436,7 @@ this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
 
 this.Write(": // ");
 
-this.Write(this.ToStringHelper.ToStringWithCulture(element.LineNumberAndXamlFile));
+this.Write(this.ToStringHelper.ToStringWithCulture(SourceComment(element)));
 
 this.Write("\r\n                {\r\n");
 
@@ -504,7 +504,12 @@ this.Write(this.ToStringHelper.ToStringWithCulture(Projection(ProjectInfo.RootNa
 
 this.Write("::implementation::XamlBindings>(std::move(objBindings));\r\n");
 
-                     if (element.IsBindingFileRoot) { 
+                     if (element.IsBindingFileRoot && IsCppHotReloadCodeGen) { 
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadRootBindingsStart(element)));
+
+this.Write("\r\n");
+
+                     } else if (element.IsBindingFileRoot) { 
 this.Write("                    Bindings = bindings;\r\n");
 
                          if (element.Type.IsDerivedFromWindow()) { 
