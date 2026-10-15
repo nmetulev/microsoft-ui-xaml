@@ -17,3 +17,5 @@ The host exits with 0 only if every check passes, and writes `plugin-host-result
 
 It is standalone: `Directory.Build.props`/`.targets` stop inheritance from the repository build, and nothing in the
 repository references it.
+
+Keep `-OutDir` short (the default is under `%TEMP%`): the XAML compiler fails with WMC1006 when package paths under`NUGET_PACKAGES` exceed MAX_PATH. Use `-NuGetFeed` where nuget.org isn't reachable.
