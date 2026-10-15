@@ -63,6 +63,7 @@ internal static class Program
             case "edit": return EditScenario(args.Skip(1).ToArray());
             case "tombstones": return TombstoneSelfTest(args[1], args[2]);
             case "reload": return ReloadScenario(args[1], args[2], args[3], args[4], args[5]);
+            case "settings": return SettingsScenario(args[1], args.Length > 2 ? args[2] : null);
             default:
                 Console.WriteLine($"unknown command {args[0]}");
                 return 1;
@@ -629,6 +630,31 @@ internal static class Program
         }
         Console.WriteLine($"tombstone self-test: {files} files, {entries} inventoried members, {restored} files rebuilt from tombstones, {failures} failures, {w.ElapsedMilliseconds} ms");
         return failures == 0 ? 0 : 1;
+    }
+    // The build records its code generation settings (XamlHotReload\codegen.json). A service whose inputs differ (for
+    // example an input.json without EnableXamlHotReload) stops with WMC9998 in both passes; one whose inputs match compiles.
+    private static int SettingsScenario(string buildInputJson, string outputPath)
+    {
+        CompilerInputs build = ReadInputs(buildInputJson);
+        string marker = Path.Combine(Path.GetDirectoryName(build.ProjectPath), build.OutputPath, "XamlHotReload", "codegen.json");
+        Console.WriteLine($"settings: the build recorded {(File.Exists(marker) ? File.ReadAllText(marker).Trim() : "(nothing)")}");
+        int Run(string label, bool flip, bool expectSuccess)
+        {
+            CompilerInputs inputs = ReadInputs(buildInputJson);
+            if (flip)
+            {
+                inputs.EnableXamlHotReload = !inputs.EnableXamlHotReload;
+            }
+            using var service = new XamlCompilerService(inputs, outputPath);
+            string page = service.AllXamlFiles.First();
+            XamlCompileResult p1 = service.CompilePass1(new[] { page });
+            XamlCompileResult p2 = service.CompilePass2(new[] { page }, null, regenerateTypeInfo: false);
+            bool flagged = p1.Diagnostics.Concat(p2.Diagnostics).Any(d => d.IsError && d.Code == "WMC9998" && (d.File ?? "").EndsWith("codegen.json", StringComparison.OrdinalIgnoreCase));
+            bool ok = expectSuccess ? p1.Success && p2.Success && !flagged : !p1.Success && !p2.Success && flagged;
+            Console.WriteLine($"  {label}: EnableXamlHotReload={inputs.EnableXamlHotReload}, pass 1 ok={p1.Success}, pass 2 ok={p2.Success}, settings error={flagged}: {(ok ? "as expected" : "UNEXPECTED")}");
+            return ok ? 0 : 1;
+        }
+        return Run("mismatched inputs", flip: true, expectSuccess: false) + Run("matching inputs", flip: false, expectSuccess: true) == 0 ? 0 : 1;
     }
 private static int ReloadScenario(string buildInputJson, string outputPath, string baselineDir, string referenceName, string olderCopy)
     {

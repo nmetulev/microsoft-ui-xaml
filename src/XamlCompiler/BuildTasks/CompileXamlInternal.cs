@@ -219,6 +219,40 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal string ServiceHotReloadStateFolder { get; set; }
         internal string HotReloadStateFolder => ServiceHotReloadStateFolder ?? OutputFolderFullpath;
 
+        // A build records the code generation settings that shape its output in XamlHotReload\codegen.json. A service
+        // compile with different settings would generate code the running build doesn't have (and a C++ host would then
+        // restart on every save), so it stops with an error instead. Typically the host's compiler inputs (input.json)
+        // left out EnableXamlHotReload.
+        private bool CheckHotReloadCodeGenSettings(bool writeSettings)
+        {
+            string folder = Path.Combine(HotReloadStateFolder, "XamlHotReload");
+            string marker = Path.Combine(folder, "codegen.json");
+            string settings = "{\"enableXamlHotReload\":" + (EnableXamlHotReload ? "true" : "false") + "}";
+            if (IsServiceCompile)
+            {
+                string recorded = File.Exists(marker) ? File.ReadAllText(marker).Trim() : null;
+                if (recorded != null && !String.Equals(recorded, settings, StringComparison.Ordinal))
+                {
+                    LogError("CompileXaml", ErrorCode.WMC9998, null, marker, 0, 0, 0, 0,
+                        "The build compiled this project with " + recorded + ", but the compiler service's inputs say " + settings +
+                        ". The service's output would not match the running build. Pass EnableXamlHotReload=\"$(EnableXamlHotReload)\" " +
+                        "to the inputs (InputSerializer / input.json), or rebuild.");
+                    return false;
+                }
+                return true;
+            }
+            if (!writeSettings)
+            {
+                return true;
+            }
+            if (!File.Exists(marker) || !String.Equals(File.ReadAllText(marker).Trim(), settings, StringComparison.Ordinal))
+            {
+                Directory.CreateDirectory(folder);
+                File.WriteAllText(marker, settings + Environment.NewLine);
+            }
+            return true;
+        }
+
         // C# only: .NET hot reload applies the generated code. C++/WinRT: IsCppHotReloadCodeGen.
         internal bool IsHotReloadCodeGen => EnableXamlHotReload && Language != null && Language.Name == ProgrammingLanguage.CSharp;
 
@@ -962,6 +996,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 removedHotReloadArtifacts =
                     HotReloadConnectionIdLedgerSession.Clean(OutputFolderFullpath);
+            }
+            if (!CheckHotReloadCodeGenSettings(writeSettings: hotReloadStableConnectionIdsEnabled))
+            {
+                return false;
             }
 
             // Checking this always keeps us up-to-date, e.g. the first build after a solution load
