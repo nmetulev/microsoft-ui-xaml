@@ -136,6 +136,11 @@ bool XamlHotReloadOverrides::IsEnabledForApp()
     return enabled;
 }
 
+void XamlHotReloadOverrides::Activate()
+{
+    g_kindProbe = &ProbeTable;
+}
+
 _Check_return_ HRESULT XamlHotReloadOverrides::SetMarkup(
     _In_z_ const WCHAR* uri,
     OverrideKind kind,

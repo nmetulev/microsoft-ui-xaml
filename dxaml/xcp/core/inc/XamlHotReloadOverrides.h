@@ -5,12 +5,14 @@
 
 #include <atomic>
 #include <cstdint>
+#include <vector>
 
 // Experimental XAML hot reload support. The only entry point is IXamlHotReloadService on the XamlDiagnostics
 // instance a diagnostics tool is sited with (see XamlOM.WinUI.idl); this header is the framework-internal side.
 struct IPALUri;
 struct IPALResource;
 struct IInspectable;
+class CDependencyObject;
 
 namespace XamlHotReloadOverrides
 {
@@ -37,6 +39,19 @@ namespace XamlHotReloadOverrides
         return g_kindProbe.load(std::memory_order_relaxed) != nullptr;
     }
 
+    // Set by Application.LoadComponent (stamped apps only) while it parses a component's markup: the parser adds the
+    // index (KnownPropertyIndex) of every property it sets on Root. Thread-local and link-free for the same reason as
+    // above; the parser only reads it.
+    struct RootPropertyRecording
+    {
+        const void* Root = nullptr;
+        std::vector<std::uint16_t>* Properties = nullptr;
+    };
+    inline thread_local RootPropertyRecording* t_rootRecording = nullptr;
+
+    // Makes IsActive() true: replaced markup, or a tool asking to load components again.
+    void Activate();
+
     // Sets *ppResource to a resource holding the replaced markup for pUri, or nullptr when it has none.
     _Check_return_ HRESULT TryGetOverrideResource(_In_ IPALUri* pUri, _Outptr_result_maybenull_ IPALResource** ppResource);
 
@@ -51,6 +66,25 @@ namespace XamlHotReloadOverrides
 
     // Called by Application.LoadComponent after each successful load (implemented with the service).
     void InvokeLoadCallbacks(_In_ IInspectable* component, _In_z_ const WCHAR* uri);
+
+    // Called by Application.LoadComponent after each successful load in a stamped app, before the load callbacks:
+    // remembers the component so ReloadComponents can find it, and, when this load ran replaced markup on a component
+    // loaded before, clears the root properties the previous markup set and this one didn't
+    // (XamlHotReloadComponents.cpp).
+    void OnComponentLoaded(
+        _In_ IInspectable* component,
+        _In_ CDependencyObject* root,
+        _In_z_ const WCHAR* uri,
+        std::int32_t resourceLocation,
+        std::vector<std::uint16_t> rootProperties);
+
+    // IXamlHotReloadService::ReloadComponents: runs Application.LoadComponent again for every live component loaded from
+    // uri, each on its own thread. *count receives how many loaded; the first failure is returned.
+    _Check_return_ HRESULT ReloadComponents(_In_z_ const WCHAR* uri, _Out_ UINT32* count);
+
+    // IXamlHotReloadService::GetLiveComponents: the calling thread's live components loaded from uri, AddRef'd, in a
+    // CoTaskMemAlloc'd array.
+    _Check_return_ HRESULT GetLiveComponents(_In_z_ const WCHAR* uri, _Out_ UINT32* count, _Outptr_result_buffer_maybenull_(*count) IInspectable*** components);
 
     // True when the app was built with the hot reload stamp. Computed once.
     bool IsEnabledForApp();

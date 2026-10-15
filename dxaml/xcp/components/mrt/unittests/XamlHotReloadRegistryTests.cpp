@@ -164,6 +164,75 @@ namespace
         Check(StampPath(L"C:\\App") == L"C:\\App\\Microsoft.UI.Xaml.HotReload.enabled", L"stamp path in a folder");
         Check(StampPath(L"C:\\App\\") == L"C:\\App\\Microsoft.UI.Xaml.HotReload.enabled", L"stamp path with a trailing slash");
     }
+
+    void RootProperties()
+    {
+        using P = std::vector<std::uint16_t>;
+        Check(RootPropertiesToClear(P{}, P{ 1, 2 }).empty(), L"a first load clears nothing");
+        Check(RootPropertiesToClear(P{ 1, 2, 3 }, P{ 3, 1 }) == P{ 2 }, L"only what the new markup no longer sets is cleared");
+        Check(RootPropertiesToClear(P{ 4, 4, 5 }, P{}) == (P{ 4, 5 }), L"each property is cleared once, in the old order");
+        Check(RootPropertiesToClear(P{ 1, 2 }, P{ 2, 1 }).empty(), L"the same properties in another order clear nothing");
+    }
+
+    // A weak reference for the table: alive while the object it names is in g_alive.
+    struct FakeWeak
+    {
+        int Object = 0;
+    };
+    std::vector<int> g_alive;
+    bool IsAlive(const FakeWeak& weak)
+    {
+        return std::find(g_alive.begin(), g_alive.end(), weak.Object) != g_alive.end();
+    }
+
+    void Components()
+    {
+        ComponentTable<FakeWeak, int> table;
+        int pageA = 0, pageB = 0, window = 0;
+        g_alive = { 1, 2, 3 };
+        const auto alive = [](const FakeWeak& weak) { return IsAlive(weak); };
+        const std::uint32_t uiThread = 10, otherThread = 20;
+
+        auto previous = table.Record(L"ms-appx:///MainPage.xaml", &pageA, uiThread, FakeWeak{ 1 }, 100, 0, { 7, 8 }, alive);
+        Check(previous.empty(), L"a first load has no previous root properties");
+        table.Record(L"ms-appx:///MainPage.xaml", &pageB, otherThread, FakeWeak{ 2 }, 200, 0, {}, alive);
+        table.Record(L"ms-appx:///MainWindow.xaml", &window, uiThread, FakeWeak{ 3 }, 100, 0, {}, alive);
+
+        auto pages = table.Match(L"ms-resource:///Files/MAINPAGE.xaml");
+        Check(pages.size() == 2, L"every live instance of a URI matches, in any spelling");
+        Check(pages[0].Uri == L"ms-appx:///MainPage.xaml" && pages[0].Thread == 100 && pages[0].ThreadId == uiThread,
+            L"a match keeps the URI as loaded and the owning thread");
+        Check(pages[1].ThreadId == otherThread, L"instances on other threads match too");
+        Check(table.Match(L"ms-appx:///MainWindow.xaml").size() == 1, L"windows are tracked like pages");
+        Check(table.Match(L"ms-appx:///Other.xaml").empty(), L"other URIs don't match");
+
+        previous = table.Record(L"ms-appx:///MainPage.xaml", &pageA, uiThread, FakeWeak{ 1 }, 100, 1, { 8 }, alive);
+        Check(previous == std::vector<std::uint16_t>{ 7, 8 }, L"loading again returns the previous load's root properties");
+        Check(table.Size() == 3, L"loading the same component again doesn't add an entry");
+        Check(table.Match(L"ms-appx:///MainPage.xaml")[0].Location == 1, L"the latest resource location is kept");
+        previous = table.Record(L"ms-appx:///MainPage.xaml", &pageA, uiThread, FakeWeak{ 1 }, 100, 1, {}, alive);
+        Check(previous == std::vector<std::uint16_t>{ 8 }, L"each load replaces the recorded root properties");
+
+        // pageA dies and a new page reuses its address: the stale entry goes, the new one starts fresh.
+        g_alive = { 2, 3, 4 };
+        previous = table.Record(L"ms-appx:///MainPage.xaml", &pageA, uiThread, FakeWeak{ 4 }, 100, 0, { 9 }, alive);
+        Check(previous.empty(), L"a new object at a dead object's address doesn't inherit its root properties");
+        Check(table.Size() == 3, L"dead entries for the URI on the loading thread are dropped");
+
+        // pageB (other thread) dies; it is only checked on its own thread, so it stays until then.
+        g_alive = { 3, 4 };
+        table.Record(L"ms-appx:///MainPage.xaml", &pageA, uiThread, FakeWeak{ 4 }, 100, 0, {}, alive);
+        Check(table.Match(L"ms-appx:///MainPage.xaml").size() == 2, L"other threads' entries aren't resolved from this one");
+        table.Record(L"ms-appx:///MainPage.xaml", &pageB, otherThread, FakeWeak{ 5 }, 200, 0, {}, [](const FakeWeak& weak)
+        {
+            return weak.Object == 5;
+        });
+        Check(table.Size() == 3, L"a dead entry is dropped when its own thread loads the URI again");
+
+        Check(table.Record(L"ms-appx:///Microsoft.UI.Xaml/Themes/generic.xaml", &window, uiThread, FakeWeak{ 3 }, 100, 0, { 1 }, alive).empty() &&
+            table.Size() == 3, L"WinUI's own markup isn't tracked");
+        Check(table.Match(L"ms-appx:///../x.xaml").empty(), L"a bad URI matches nothing");
+    }
 }
 
 int wmain()
@@ -174,6 +243,8 @@ int wmain()
     Table();
     Cookies();
     Stamp();
+    RootProperties();
+    Components();
     std::wprintf(L"%d check(s), %d failed\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }
