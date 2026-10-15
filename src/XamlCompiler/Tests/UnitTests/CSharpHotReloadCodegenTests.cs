@@ -79,6 +79,61 @@ namespace UnitTests
             Assert.IsTrue(Regex.IsMatch(shell, @"public void Connect\([^)]*\)\s*\{\s*\}"), shell);
         }
 
+        // A live XamlTypeInfoProvider created its list of library providers (OtherProviders) before an update that added a
+        // package or project reference; the reset after an update rebuilds it, so the new library's types are found.
+        [TestMethod]
+        public void HotReload_TypeInfoResetRebuildsOtherProviders()
+        {
+            string reset = HotReloadReset(GenerateTypeInfoWithOtherProvider(hotReload: true, "FullXamlMetadataProvider"));
+            StringAssert.Contains(reset, "_otherProviders = null;");
+            StringAssert.Contains(reset, "_typeTable = null;");
+
+            // Filled from outside by AddOtherProvider: the list is not the provider's to rebuild.
+            string addedFromOutside = HotReloadReset(GenerateTypeInfoWithOtherProvider(hotReload: true, "FullXamlMetadataProvider, DoNotGenerateOtherProviders"));
+            Assert.IsFalse(addedFromOutside.Contains("_otherProviders"), addedFromOutside);
+
+            string normal = GenerateTypeInfoWithOtherProvider(hotReload: false, "FullXamlMetadataProvider");
+            Assert.IsFalse(normal.Contains("HotReloadResetIfUpdated"), normal);
+            StringAssert.Contains(normal, "_otherProviders = otherProviders;");
+        }
+
+        private string GenerateTypeInfoWithOtherProvider(bool hotReload, string codeGenFlags)
+        {
+            const string xaml = @"<Page xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+    xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+    xmlns:dll='using:LibManagedDll'>
+    <Page.Resources>
+        <dll:SimpleClass x:Key='key'/>
+    </Page.Resources>
+</Page>";
+            DirectUISchemaContext schema = _testHelper.LoadSchema(SchemaMode.ManagedRuntime | SchemaMode.LoadUserDll);
+            TypeInfoCollector collector = _testHelper.CollectTypes(xaml, schema);
+
+            // Any type stands in for a library's metadata provider: code generation only uses its name.
+            object provider = new TypeForCodeGen(schema.GetXamlType(new XamlTypeName("using:LibManagedDll", "SimpleClass"))).Instance;
+            var providers = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(provider.GetType()));
+            providers.Add(provider);
+            collector.SchemaInfo.Instance.GetType().GetProperty("OtherMetadataProviders").SetValue(collector.SchemaInfo.Instance, providers);
+
+            var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "HotReloadOtherProviders");
+            context.IsLibrary = true;
+            context.RootNamespace = "HotReloadOtherProviders";
+            context.ProjectInfo.SetCodeGenFlags(codeGenFlags);
+            context.ProjectInfo.IsHotReloadBuild = hotReload;
+            context.ProjectInfo.IsHotReloadCodeGen = hotReload;
+            List<FileNameAndContentPair> pairs = _testHelper.GenerateTypeInfo(false, collector.SchemaInfo, context.ProjectInfo,
+                new ClassName("HotReloadOtherProviders.App"), CodeGenLanguage.CSharp);
+            Assert.AreEqual(1, pairs.Count);
+            return pairs[0].Contents;
+        }
+
+        private static string HotReloadReset(string typeInfo)
+        {
+            Match reset = Regex.Match(typeInfo, @"private void HotReloadResetIfUpdated\(\)\s*\{.*?\n        \}", RegexOptions.Singleline);
+            Assert.IsTrue(reset.Success, typeInfo);
+            return reset.Value;
+        }
+
         private string Generate(bool hotReload)
         {
             var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "CSharpHotReloadCodegen");
