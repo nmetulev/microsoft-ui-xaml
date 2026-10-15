@@ -42,6 +42,7 @@ internal sealed class Harness
     private ProjectId? _projectId;
     private Solution? _solution;
     private Solution? _committedSolution;
+    private readonly List<string> _reloadedReferences = new();
     private EncSession? _enc;
     private XamlCompilerService? _service;
     private int _baselines;
@@ -79,6 +80,8 @@ internal sealed class Harness
                 "<TextBlock x:Name=\"Later\"", "<TextBox x:Name=\"Later\"", "rude edit"));
         }
         harness._verifyBuild = args.Contains("--verify-build");
+        // Every XamlTypeInfo the service builds from its per-page cache is checked against collecting every page.
+        XamlCompilerService.VerifyTypeInfo |= harness._verifyBuild;
         Console.WriteLine($"project: {harness._projectFile}");
         Console.WriteLine($"mode: {mode}; SDK: {sdk}; compiler: {harness._compilerExe}");
         harness.ResetSources();
@@ -140,7 +143,10 @@ internal sealed class Harness
             }
             if (!string.IsNullOrWhiteSpace(reference))
             {
-                inputs.ReferenceAssemblies.Add(new MSBuildItem { ItemSpec = reference, FullPath = reference, DependentUpon = "", MSBuild_Link = "", MSBuild_TargetPath = "", MSBuild_XamlResourceMapName = "", MSBuild_XamlComponentResourceLocation = "" });
+                inputs.ReferenceAssemblies.Add(ReferenceItem(reference));
+                // From here on the harness's own builds and the C# project reference it too, as the host's workspace does.
+                _reloadedReferences.Add(reference);
+                _solution = _solution!.AddMetadataReference(_projectId!, MetadataReference.CreateFromFile(reference));
             }
             XamlReloadResult reload = _service!.ReloadInputs(inputs);
             return new StepResult(step.Id, step.Title, step.Expect)
@@ -295,7 +301,8 @@ internal sealed class Harness
                 return "XamlTypeInfo: " + FirstError(full);
             }
             ApplyGenerated(full);
-            result.Notes.Add("XamlTypeInfo regenerated");
+            XamlCompileMarker check = full.Markers.FirstOrDefault(m => m.Name == "type info check");
+            result.Notes.Add("XamlTypeInfo regenerated" + (check != null ? $" (cache check: {check.Info}, {check.Milliseconds:F0} ms)" : ""));
         }
         return null;
     }
@@ -457,8 +464,11 @@ internal sealed class Harness
             MSBuild_XamlResourceMapName = "",
             MSBuild_XamlComponentResourceLocation = "",
         })).ToList();
+        inputs.ReferenceAssemblies.AddRange(_reloadedReferences.Select(ReferenceItem));
         return inputs;
     }
+
+    private static MSBuildItem ReferenceItem(string path) => new MSBuildItem { ItemSpec = path, FullPath = path, DependentUpon = "", MSBuild_Link = "", MSBuild_TargetPath = "", MSBuild_XamlResourceMapName = "", MSBuild_XamlComponentResourceLocation = "" };
 
     private void RunCompiler(CompilerInputs inputs, bool pass1, string? localAssembly, string? workDir = null)
     {
@@ -510,6 +520,7 @@ internal sealed class Harness
             args.Add(arg.StartsWith('/') ? arg : MapGenerated(arg));
         }
         args.AddRange(_addedSources);
+        args.AddRange(_reloadedReferences.Select(r => "/reference:" + r));
         foreach (string page in _addedXamlPages)
         {
             string stem = Path.Combine(_outDir, Path.ChangeExtension(page, null));

@@ -63,3 +63,10 @@ v4, behavior (no API change): short state file names
     path"). When the folder itself is deep, it is addressed as \\?\<path>, so XamlCompiler.exe (.NET Framework) writes
     beyond 260 characters. If a state path still can't be used, the error is WMC9998 naming the path, its length and
     the limit, not an internal error. A build's state from an earlier compiler isn't read: rebuild after upgrading.
+
+v4, additive: type information check
+  + XamlCompilerService.VerifyTypeInfo (static; default: environment variable XAML_COMPILER_SERVICE_VERIFY_TYPEINFO=1,
+    which --serve honors too). For hosts' test runs: a pass 2 that regenerates XamlTypeInfo and replays other pages'
+    type information from the per-page cache also collects every page again without the cache. If the two
+    XamlTypeInfo files differ, the compile fails with WMC9998 (first differing line in the message) and returns the
+    full collection's XamlTypeInfo. Markers: "type info check" (identical/different, ms). About doubles that compile.
