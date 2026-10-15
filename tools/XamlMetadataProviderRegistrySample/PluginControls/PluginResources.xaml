@@ -1,0 +1,9 @@
+<!-- Names the plugin's controls in markup, so the XAML compiler puts them (and their members) in this library's
+     generated IXamlMetadataProvider. Nothing loads this dictionary at runtime. -->
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:PluginControls">
+    <local:Badge x:Key="SampleBadge" Label="sample" Count="1" />
+    <local:StarRating x:Key="SampleRating" Stars="2" />
+</ResourceDictionary>

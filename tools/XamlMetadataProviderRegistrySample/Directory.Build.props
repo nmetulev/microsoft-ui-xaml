@@ -1,0 +1,4 @@
+<!-- Stops MSBuild property inheritance from the repository root. This sample is a standalone app that builds against
+     a Microsoft.WindowsAppSDK.WinUI package (see run.ps1); it is not part of any repository build. -->
+<Project>
+</Project>
