@@ -273,6 +273,11 @@ service compile generate the same shape.
 
 ### 1. Stable, append-only connection IDs and tombstones
 
+**Settings check.** The build also records the code generation settings that shape its output
+(`XamlHotReload\codegen.json`, `{"enableXamlHotReload":…}`). A service compile, either pass, whose inputs differ fails
+with WMC9998 at that file instead of generating code the running build doesn't have. A host whose `input.json` left
+out `EnableXamlHotReload` used to get, for example, C++ `static_assert`s and `.g.h` members that differ from the build.
+
 **Where the state lives.** The connection ID ledger and the member inventories are in the build's output folder
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.

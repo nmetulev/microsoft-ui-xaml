@@ -140,7 +140,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 foreach (string path in Directory.GetFiles(ledgerDirectory, "*.xaml.connids.json")
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.xaml.hotreload.json"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.members.json"))
-                    .Concat(Directory.GetFiles(ledgerDirectory, "connection-ids.pending")))
+                    .Concat(Directory.GetFiles(ledgerDirectory, "connection-ids.pending"))
+                    .Concat(Directory.GetFiles(ledgerDirectory, "codegen.json")))
                 {
                     File.Delete(path);
                     removedArtifacts = true;
