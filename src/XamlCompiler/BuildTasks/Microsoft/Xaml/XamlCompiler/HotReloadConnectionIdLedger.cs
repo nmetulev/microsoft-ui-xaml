@@ -883,12 +883,26 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 identityKind = "unique-structural";
                 dependsOnParent = true;
             }
+            else if (parentIdentity.ElementKey != null)
+            {
+                // Unnamed siblings of the same type: their position among those siblings. An unchanged file gets the same
+                // keys on every compile, and an edit elsewhere in the file doesn't move them. Inserting a sibling of the
+                // same type before one shifts the keys after it, which only reassigns IDs among fields of that type.
+                string memberName = domObject.Parent?.Member?.Name ?? String.Empty;
+                elementKey = parentIdentity.ElementKey + "|" +
+                    HotReloadConnectionIdText.Part("member", memberName) + "|" +
+                    HotReloadConnectionIdText.Part("type", typeName) + "|" +
+                    HotReloadConnectionIdText.Part("index", UnnamedSiblingIndex(domObject, typeName).ToString(CultureInfo.InvariantCulture));
+                collisionKey = elementKey;
+                identityKind = "indexed-structural";
+                dependsOnParent = true;
+            }
             else
             {
                 elementKey = null;
                 collisionKey = null;
                 identityKind = "ambiguous";
-                ambiguityReason = "The unnamed element is not unique by parent, owning member, and type.";
+                ambiguityReason = "The structural parent does not have a stable identity.";
             }
 
             HotReloadConnectionIdentity identity = new HotReloadConnectionIdentity
@@ -992,6 +1006,24 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         typeName,
                         StringComparison.Ordinal));
             return matchingUnnamedSiblings == 1;
+        }
+
+        private static int UnnamedSiblingIndex(XamlDomObject domObject, string typeName)
+        {
+            int index = 0;
+            foreach (XamlDomObject sibling in domObject.Parent.Items.OfType<XamlDomObject>())
+            {
+                if (ReferenceEquals(sibling, domObject))
+                {
+                    return index;
+                }
+                if (!HasAuthoredIdentity(sibling) &&
+                    String.Equals(HotReloadConnectionIdText.GetTypeName(sibling.Type), typeName, StringComparison.Ordinal))
+                {
+                    index++;
+                }
+            }
+            return index;
         }
 
         private static bool HasAuthoredIdentity(XamlDomObject domObject)

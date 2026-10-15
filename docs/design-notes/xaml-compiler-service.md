@@ -275,6 +275,7 @@ service compile generate the same shape.
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.
 
+- **Indexed structural keys** for unnamed elements that aren't unique among their siblings (see the risks section).
 - **Deterministic transient IDs.** An element without a stable key (no `x:Name`, `x:Uid` or `x:Key`, and not unique
   by structure) used to get a new ID on every compile, so recompiling the same markup changed the output.
   - Each such element now has a fingerprint: scope, type and collision key.
@@ -495,8 +496,10 @@ on a loaded machine), against 10 to 13.5 s for a cold service. A host still need
   - Tombstones exist only between builds; a build is a new baseline. A tombstone whose field type is a user type
     that was since deleted or renamed fails to compile. That edit is a rude edit in user code anyway, but the error
     shows up in generated code.
-  - Elements without a stable key get transient IDs. They are deterministic for unchanged markup, but moving such
-    an element can still renumber it, which retires the old field (a tombstone, not a rude edit).
+  - Unnamed elements that aren't unique among their siblings get an indexed structural key (parent, member, type,
+    position among same-type unnamed siblings), so an unchanged file keeps its IDs (Gallery: 543 ambiguous identities
+    before, 0 after). Inserting an unnamed sibling of the same type before one shifts the IDs after it, among fields of
+    the same type: not a rude edit. Transient IDs remain only under a parent without a stable identity.
   - WinUI's native metadata cache keeps the `IXamlType` objects it already resolved. The provider reset makes new
     types and members resolvable; a changed member on a type WinUI has already cached (for example a new dependency
     property on a user control that's on screen) may still need a restart. Not tested with a running app.
