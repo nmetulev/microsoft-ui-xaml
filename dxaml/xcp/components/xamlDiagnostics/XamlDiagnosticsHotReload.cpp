@@ -9,6 +9,7 @@
 #include "MetadataAPI.h"
 #include <XamlHotReloadOverrides.h>
 #include <XamlHotReloadRegistry.h>
+#include <XamlTypeCacheGenerations.h>
 #include <roerrorapi.h>
 
 namespace
@@ -115,6 +116,8 @@ IFACEMETHODIMP XamlDiagnostics::UnadviseComponentLoaded(DWORD cookie)
     return S_OK;
 }
 
+// A thin gate over the general API, Microsoft.UI.Xaml.Markup.XamlMetadataProviderRegistry.Register: same registry, same
+// rules, same errors. The service only adds the hot reload stamp check.
 IFACEMETHODIMP XamlDiagnostics::RegisterMetadataProvider(_In_ IInspectable* provider)
 {
     IFC_RETURN(EnsureEnabled());
@@ -126,20 +129,16 @@ IFACEMETHODIMP XamlDiagnostics::RegisterMetadataProvider(_In_ IInspectable* prov
     wrl::ComPtr<xaml_markup::IXamlMetadataProvider> metadataProvider;
     IFC_RETURN(provider->QueryInterface(IID_PPV_ARGS(&metadataProvider)));
 
-    const auto result = DirectUI::MetadataAPI::RegisterSideMetadataProvider(metadataProvider.Get());
-    if (result.Status != DirectUI::XamlMetadataProviderRegistrationStatus::Registered &&
-        result.Status != DirectUI::XamlMetadataProviderRegistrationStatus::AlreadyRegistered)
-    {
-        return Refuse(E_FAIL, L"The metadata provider was refused (the registry is full or the provider is invalid).");
-    }
-
-    return InvalidateTypeCaches();
+    std::wstring message;
+    const HRESULT hr = DirectUI::DescribeRegistrationResult(
+        DirectUI::MetadataAPI::RegisterSideMetadataProvider(metadataProvider.Get()), message);
+    return FAILED(hr) ? Refuse(hr, message.c_str()) : S_OK;
 }
 
 IFACEMETHODIMP XamlDiagnostics::InvalidateTypeCaches()
 {
     IFC_RETURN(EnsureEnabled());
     DirectUI::MetadataAPI::InvalidateUnresolvedTypeCache();
-    XamlHotReloadOverrides::g_typeGeneration.fetch_add(1);
+    XamlTypeCacheGenerations::g_typesAdded.fetch_add(1, std::memory_order_relaxed);
     return S_OK;
 }

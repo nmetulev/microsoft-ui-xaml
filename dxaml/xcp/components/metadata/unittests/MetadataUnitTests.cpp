@@ -20,6 +20,7 @@
 
 #include "MetadataUnitTests.h"
 #include "CustomXamlProviders.h"
+#include <XamlTypeCacheGenerations.h>
 
 using namespace DirectUI;
 using namespace xaml_interop;
@@ -633,12 +634,13 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
             VERIFY_ARE_EQUAL(builtInProperty, prop);
         }
     }
-    #pragma region Side IXamlMetadataProvider registry (experimental)
+    #pragma region Registered IXamlMetadataProviders (XamlMetadataProviderRegistry)
 
     DECLARE_CONST_STRING_IN_TEST_CODE(c_FullNameNewPage, L"HotReload.NewPage");
     DECLARE_CONST_STRING_IN_TEST_CODE(c_FullNameOtherPage, L"HotReload.OtherPage");
     DECLARE_CONST_STRING_IN_TEST_CODE(c_FullNameAppOwnedType, L"HotReload.AppOwnedType");
     DECLARE_CONST_STRING_IN_TEST_CODE(c_FullNameContestedType, L"HotReload.ContestedType");
+    DECLARE_CONST_STRING_IN_TEST_CODE(c_FullNamePluginWidget, L"Plugin.Widget");
 
     namespace
     {
@@ -707,12 +709,10 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_ARE_EQUAL(resolved, resolvedAgain, L"The miss is cached, not recomputed");
     }
 
-    // 2. The headline scenario, including its own mutation proof.
-    //
-    //    Note step 3: after registering the provider but BEFORE invalidating, the lookup still misses.
-    //    That is deliberate. It proves the cached miss is real and that InvalidateUnresolvedTypeCache
-    //    is load-bearing - if the invalidation logic were removed, step 5 would fail.
-    void MetadataUnitTests::SideProvider_ResolvesNameThatPreviouslyMissed()
+    // 2. The headline scenario: a name that failed to resolve resolves after its provider is registered, with no
+    //    separate invalidation call. Mutation proof: step 1 caches the miss, so if registration did not evict it,
+    //    step 3 would return the same placeholder.
+    void MetadataUnitTests::SideProvider_RegistrationForgetsCachedMisses()
     {
         MockXamlMetadataProvider appProvider;
         SetUpAppProvider(appProvider, nullptr);
@@ -722,43 +722,40 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &beforeRegistration));
         VERIFY_IS_TRUE(IsUnresolved(beforeRegistration), L"Lookup misses before registration");
 
-        // Step 2: register the side provider that knows the new type.
+        const auto typesAddedBefore = XamlTypeCacheGenerations::g_typesAdded.load();
+
+        // Step 2: register the provider that knows the type.
         auto sideProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
-
         auto registration = MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get());
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, registration.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, registration.Status);
         VERIFY_IS_TRUE(registration.IsRegistered());
-        VERIFY_IS_TRUE(registration.ProviderId != c_invalidXamlMetadataProviderId, L"A registered provider gets a real id");
+        VERIFY_IS_TRUE(registration.Id != c_invalidXamlMetadataProviderId, L"A registered provider gets a real id");
+        VERIFY_IS_TRUE(XamlTypeCacheGenerations::g_typesAdded.load() != typesAddedBefore,
+            L"The parser's 'type not found' caches are told to refresh");
 
-        // Step 3 (mutation proof): registration alone must NOT be enough, because the miss is cached.
-        const CClassInfo* afterRegistrationOnly = nullptr;
-        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &afterRegistrationOnly));
-        VERIFY_ARE_EQUAL(beforeRegistration, afterRegistrationOnly, L"The cached miss still shadows the new provider");
-        VERIFY_IS_TRUE(IsUnresolved(afterRegistrationOnly));
-
-        // Step 4: invalidate the cached miss for just this name.
-        auto invalidation = MetadataAPI::InvalidateUnresolvedTypeCache(c_FullNameNewPage);
-        VERIFY_ARE_EQUAL(static_cast<size_t>(1), invalidation.UnresolvedEntriesEvicted, L"Exactly the one cached miss was evicted");
-        VERIFY_IS_TRUE(invalidation.Generation > registration.Generation, L"Invalidation is observable via the generation");
-
-        // Step 5: the name now resolves through the side provider.
-        const CClassInfo* afterInvalidation = nullptr;
-        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &afterInvalidation));
-        VERIFY_IS_NOT_NULL(afterInvalidation);
-        VERIFY_IS_FALSE(IsUnresolved(afterInvalidation), L"The name resolves through the side provider");
+        // Step 3: the name now resolves through the registered provider.
+        const CClassInfo* afterRegistration = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &afterRegistration));
+        VERIFY_ARE_NOT_EQUAL(beforeRegistration, afterRegistration, L"Registration evicted the cached miss");
+        VERIFY_IS_FALSE(IsUnresolved(afterRegistration), L"The name resolves through the registered provider");
         VERIFY_ARE_EQUAL(
             sideProvider->GetTypeNoRef(L"HotReload.NewPage").Get(),
-            static_cast<const CCustomClassInfo*>(afterInvalidation)->GetXamlTypeNoRef(),
-            L"The resolved type is the one the side provider supplied");
+            static_cast<const CCustomClassInfo*>(afterRegistration)->GetXamlTypeNoRef(),
+            L"The resolved type is the one the registered provider supplied");
+        VERIFY_IS_TRUE(static_cast<const CCustomClassInfo*>(afterRegistration)->GetSideProviderClaim() != 0,
+            L"The type is tagged with the claim that records who supplied it");
     }
 
-    // 3. The by-TypeName entry point (used by Frame.Navigate(typeof(NewPage))) resolves too.
+    // 3. The by-TypeName entry point (used by Frame.Navigate(typeof(NewPage))) resolves too, both for WinRT types and
+    //    for non-WinRT (.NET) types, whose TypeName is assembly-qualified.
     void MetadataUnitTests::SideProvider_ResolvesByTypeName()
     {
         MockXamlMetadataProvider appProvider;
         SetUpAppProvider(appProvider, nullptr);
 
-        auto sideProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto sideProvider = MockSideXamlMetadataProvider::Create()
+            ->WithType(L"HotReload.NewPage")
+            ->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, Plugin, Version=1.0.0.0");
         VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get()).IsRegistered());
 
         wrl_wrappers::HStringReference newPageRef(L"HotReload.NewPage");
@@ -767,17 +764,32 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         const CClassInfo* resolved = nullptr;
         VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(newPageTypeName, &resolved));
         VERIFY_IS_NOT_NULL(resolved);
-        VERIFY_IS_FALSE(IsUnresolved(resolved), L"GetClassInfoByTypeName resolves through the side provider");
+        VERIFY_IS_FALSE(IsUnresolved(resolved), L"GetClassInfoByTypeName resolves through the registered provider");
         VERIFY_ARE_EQUAL(
             sideProvider->GetTypeNoRef(L"HotReload.NewPage").Get(),
             static_cast<const CCustomClassInfo*>(resolved)->GetXamlTypeNoRef());
+
+        wrl_wrappers::HStringReference widgetRef(L"Plugin.Widget, Plugin, Version=1.0.0.0");
+        wxaml_interop::TypeName widgetTypeName = { widgetRef.Get(), wxaml_interop::TypeKind_Custom };
+
+        const CClassInfo* widget = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(widgetTypeName, &widget));
+        VERIFY_IS_FALSE(IsUnresolved(widget), L"A .NET type resolves by its assembly-qualified TypeName");
+        VERIFY_ARE_EQUAL(
+            sideProvider->GetTypeNoRef(L"Plugin.Widget").Get(),
+            static_cast<const CCustomClassInfo*>(widget)->GetXamlTypeNoRef());
+
+        // Markup finds the same type by its full name.
+        const CClassInfo* widgetByName = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &widgetByName));
+        VERIFY_ARE_EQUAL(widget, widgetByName, L"Full name and TypeName lookups agree");
     }
 
     // 4. Registration is additive. Two independent halves:
     //      (a) a name already resolved keeps its identity, and
     //      (b) a name resolved for the FIRST time after registration still goes to the application
     //          provider when both providers can answer.
-    //    (b) is the one that actually pins the ordering down. (a) alone would pass even if side
+    //    (b) is the one that actually pins the ordering down. (a) alone would pass even if registered
     //    providers ran first, because the positive cache would hide the ordering.
     void MetadataUnitTests::SideProvider_DoesNotDisturbTypesTheAppProviderOwns()
     {
@@ -796,15 +808,13 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameAppOwnedType, false, &before));
         VERIFY_IS_FALSE(IsUnresolved(before), L"The app provider resolves its own type");
 
-        // A side provider that also claims to own both app types must not be able to take either
-        // over, because side providers are only consulted after the app provider declines.
-        // Note it supplies its OWN IXamlType for the contested name, so identity distinguishes them.
+        // A registered provider that also claims to own both app types must not be able to take either over,
+        // because registered providers are only consulted after the app provider declines.
         auto sideProvider = MockSideXamlMetadataProvider::Create()
             ->WithType(L"HotReload.AppOwnedType")
             ->WithType(L"HotReload.ContestedType")
             ->WithType(L"HotReload.NewPage");
         VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get()).IsRegistered());
-        MetadataAPI::InvalidateUnresolvedTypeCache();
 
         // (a) The already-cached type is untouched.
         const CClassInfo* after = nullptr;
@@ -828,7 +838,14 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_ARE_EQUAL(
             appContestedType.Get(),
             static_cast<const CCustomClassInfo*>(contested)->GetXamlTypeNoRef(),
-            L"A contested name resolves through the application provider, not the side provider");
+            L"A contested name resolves through the application provider, not the registered provider");
+
+        // And unregistering the provider never touches types the app provider supplied.
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded,
+            MetadataAPI::UnregisterSideMetadataProvider(sideProvider.Get()).Status);
+        const CClassInfo* afterUnregister = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameContestedType, false, &afterUnregister));
+        VERIFY_ARE_EQUAL(contested, afterUnregister, L"App-owned types survive unregistration");
     }
 
     // 5. Registering the same provider twice is a no-op that says so.
@@ -840,60 +857,177 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         auto sideProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
 
         auto first = MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get());
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, first.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, first.Status);
 
         auto second = MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get());
         VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::AlreadyRegistered, second.Status);
-        VERIFY_ARE_EQUAL(first.ProviderId, second.ProviderId, L"The original id is reported back");
+        VERIFY_ARE_EQUAL(first.Id, second.Id, L"The original id is reported back");
         VERIFY_ARE_EQUAL(first.Generation, second.Generation, L"A no-op registration does not bump the generation");
         VERIFY_ARE_EQUAL(static_cast<size_t>(1), MetadataAPI::GetSideMetadataProviderCount(), L"The provider is not registered twice");
+        VERIFY_IS_TRUE(MetadataAPI::IsSideMetadataProviderRegistered(sideProvider.Get()));
     }
 
-    // 6. Two providers answering for the same name is rejected, not resolved by ordering.
+    // 6. A provider that describes a name already in use as a DIFFERENT type is refused, not resolved by ordering.
     void MetadataUnitTests::SideProvider_ConflictingProviderIsRejected()
     {
         MockXamlMetadataProvider appProvider;
         SetUpAppProvider(appProvider, nullptr);
 
-        auto firstProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
-        auto firstRegistration = MetadataAPI::RegisterSideMetadataProvider(firstProvider.Get());
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, firstRegistration.Status);
+        auto firstProvider = MockSideXamlMetadataProvider::Create()
+            ->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV1, Version=1.0.0.0");
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded,
+            MetadataAPI::RegisterSideMetadataProvider(firstProvider.Get()).Status);
 
-        // Resolve the name so the registry knows firstProvider owns it.
+        // Resolve the name so the registry knows firstProvider supplies it.
         const CClassInfo* resolved = nullptr;
-        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &resolved));
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &resolved));
         VERIFY_IS_FALSE(IsUnresolved(resolved));
 
-        auto generationBeforeConflict = MetadataAPI::GetMetadataProviderGeneration();
+        const auto generationBeforeConflict = MetadataAPI::GetMetadataProviderGeneration();
 
-        // A second provider that answers for the same name is refused outright.
-        auto conflictingProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        // Another library that also defines Plugin.Widget is refused outright.
+        auto conflictingProvider = MockSideXamlMetadataProvider::Create()
+            ->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV2, Version=2.0.0.0");
         auto conflict = MetadataAPI::RegisterSideMetadataProvider(conflictingProvider.Get());
 
         VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Conflict, conflict.Status);
         VERIFY_IS_FALSE(conflict.IsRegistered());
-        VERIFY_ARE_EQUAL(c_invalidXamlMetadataProviderId, conflict.ProviderId, L"A rejected provider gets no id");
+        VERIFY_ARE_EQUAL(c_invalidXamlMetadataProviderId, conflict.Id, L"A rejected provider gets no id");
+        VERIFY_IS_TRUE(conflict.ConflictingName.Equals(c_FullNamePluginWidget), L"The refusal names the type");
         VERIFY_ARE_EQUAL(generationBeforeConflict, conflict.Generation, L"A rejected registration does not bump the generation");
         VERIFY_ARE_EQUAL(static_cast<size_t>(1), MetadataAPI::GetSideMetadataProviderCount(), L"The conflicting provider was not added");
 
-        // The winner is deterministic: the name still resolves through the provider that owned it,
-        // not through whichever provider registered most recently.
-        MetadataAPI::InvalidateUnresolvedTypeCache();
+        std::wstring message;
+        VERIFY_ARE_EQUAL(HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS), DescribeRegistrationResult(conflict, message));
+        VERIFY_IS_TRUE(message.find(L"Plugin.Widget") != std::wstring::npos, L"The public error names the type");
+
         const CClassInfo* stillResolved = nullptr;
-        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &stillResolved));
-        VERIFY_ARE_EQUAL(
-            firstProvider->GetTypeNoRef(L"HotReload.NewPage").Get(),
-            static_cast<const CCustomClassInfo*>(stillResolved)->GetXamlTypeNoRef(),
-            L"The original owner still wins");
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &stillResolved));
+        VERIFY_ARE_EQUAL(resolved, stillResolved, L"The original type is untouched");
 
         // A provider that answers for a *different* name is fine.
         auto disjointProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.OtherPage");
         VERIFY_ARE_EQUAL(
-            XamlMetadataProviderRegistrationStatus::Registered,
+            XamlMetadataProviderRegistrationStatus::Succeeded,
             MetadataAPI::RegisterSideMetadataProvider(disjointProvider.Get()).Status);
     }
 
-    // 7. The registry owns the provider's lifetime for as long as it is registered.
+    // 7. Two providers that describe the same type (two plugins referencing one library) share it: no conflict, one
+    //    CClassInfo, and it survives until the last of them is unregistered.
+    void MetadataUnitTests::SideProvider_SharedTypeSurvivesUntilLastProviderLeaves()
+    {
+        MockXamlMetadataProvider appProvider;
+        SetUpAppProvider(appProvider, nullptr);
+
+        auto pluginOne = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto pluginTwo = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, MetadataAPI::RegisterSideMetadataProvider(pluginOne.Get()).Status);
+
+        const CClassInfo* shared = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &shared));
+        VERIFY_IS_FALSE(IsUnresolved(shared));
+
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded,
+            MetadataAPI::RegisterSideMetadataProvider(pluginTwo.Get()).Status,
+            L"Agreeing about a type in use is not a conflict");
+
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded,
+            MetadataAPI::UnregisterSideMetadataProvider(pluginOne.Get()).Status);
+        const CClassInfo* afterFirstLeaves = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &afterFirstLeaves));
+        VERIFY_ARE_EQUAL(shared, afterFirstLeaves, L"The type keeps its identity while another provider still supplies it");
+
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded,
+            MetadataAPI::UnregisterSideMetadataProvider(pluginTwo.Get()).Status);
+        const CClassInfo* afterLastLeaves = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &afterLastLeaves));
+        VERIFY_IS_TRUE(IsUnresolved(afterLastLeaves), L"Once nobody supplies it, the name stops resolving");
+    }
+
+    // 8. Registered providers that disagree about a name nobody has used yet make it ambiguous: it resolves to nothing,
+    //    whatever the registration order. Unregistering one of them settles it.
+    void MetadataUnitTests::SideProvider_AmbiguousNameResolvesToNothing()
+    {
+        MockXamlMetadataProvider appProvider;
+        SetUpAppProvider(appProvider, nullptr);
+
+        auto v1 = MockSideXamlMetadataProvider::Create()->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV1, Version=1.0.0.0");
+        auto v2 = MockSideXamlMetadataProvider::Create()->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV2, Version=2.0.0.0");
+        VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(v1.Get()).IsRegistered());
+        VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(v2.Get()).IsRegistered(), L"Unused names can't conflict yet");
+
+        const CClassInfo* ambiguous = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &ambiguous));
+        VERIFY_IS_TRUE(IsUnresolved(ambiguous), L"An ambiguous name resolves to nothing rather than to the first provider");
+
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, MetadataAPI::UnregisterSideMetadataProvider(v1.Get()).Status);
+
+        const CClassInfo* settled = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &settled));
+        VERIFY_IS_FALSE(IsUnresolved(settled), L"With one provider left the name resolves");
+        VERIFY_ARE_EQUAL(
+            v2->GetTypeNoRef(L"Plugin.Widget").Get(),
+            static_cast<const CCustomClassInfo*>(settled)->GetXamlTypeNoRef());
+    }
+
+    // 9. Unregistering forgets exactly the names only that provider supplied. Objects created from those types keep
+    //    working: their CClassInfo (and its IXamlType) stays reachable by index.
+    void MetadataUnitTests::SideProvider_UnregisterForgetsOnlyItsTypes()
+    {
+        wrl_wrappers::HStringReference appOwnedRef(L"HotReload.AppOwnedType");
+        auto appOwnedType = MockXamlType::CreateMetadata(appOwnedRef.Get())->WithBaseType(KnownTypeIndex::Object);
+
+        MockXamlMetadataProvider appProvider;
+        SetUpAppProvider(appProvider, appOwnedType);
+
+        auto pluginA = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto pluginB = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.OtherPage");
+        VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(pluginA.Get()).IsRegistered());
+        VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(pluginB.Get()).IsRegistered());
+
+        const CClassInfo* newPage = nullptr;
+        const CClassInfo* otherPage = nullptr;
+        const CClassInfo* appOwned = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &newPage));
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameOtherPage, false, &otherPage));
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameAppOwnedType, false, &appOwned));
+        VERIFY_IS_FALSE(IsUnresolved(newPage));
+        VERIFY_IS_FALSE(IsUnresolved(otherPage));
+        const KnownTypeIndex newPageIndex = newPage->GetIndex();
+
+        const auto typesRemovedBefore = XamlTypeCacheGenerations::g_typesRemoved.load();
+        const auto removal = MetadataAPI::UnregisterSideMetadataProvider(pluginA.Get());
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, removal.Status);
+        VERIFY_ARE_EQUAL(static_cast<size_t>(1), removal.OrphanedClaims.size(), L"Exactly one type lost its last provider");
+        VERIFY_IS_TRUE(XamlTypeCacheGenerations::g_typesRemoved.load() != typesRemovedBefore,
+            L"The parser's name caches are told to refresh");
+        VERIFY_IS_FALSE(MetadataAPI::IsSideMetadataProviderRegistered(pluginA.Get()));
+
+        const CClassInfo* newPageAfter = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &newPageAfter));
+        VERIFY_IS_TRUE(IsUnresolved(newPageAfter), L"Its name no longer resolves");
+
+        VERIFY_ARE_EQUAL(newPage, MetadataAPI::GetClassInfoByIndex(newPageIndex), L"The old type entry is still there for live objects");
+        VERIFY_ARE_EQUAL(
+            pluginA->GetTypeNoRef(L"HotReload.NewPage").Get(),
+            static_cast<const CCustomClassInfo*>(newPage)->GetXamlTypeNoRef(),
+            L"and still holds its IXamlType");
+
+        const CClassInfo* otherPageAfter = nullptr;
+        const CClassInfo* appOwnedAfter = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameOtherPage, false, &otherPageAfter));
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameAppOwnedType, false, &appOwnedAfter));
+        VERIFY_ARE_EQUAL(otherPage, otherPageAfter, L"Another provider's type is untouched");
+        VERIFY_ARE_EQUAL(appOwned, appOwnedAfter, L"The app's type is untouched");
+
+        // Registering it again brings the name back, as a new type entry.
+        VERIFY_IS_TRUE(MetadataAPI::RegisterSideMetadataProvider(pluginA.Get()).IsRegistered());
+        const CClassInfo* newPageAgain = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &newPageAgain));
+        VERIFY_IS_FALSE(IsUnresolved(newPageAgain), L"Re-registering makes the name resolve again");
+    }
+
+    // 10. The registry owns the provider's lifetime for as long as it is registered.
     void MetadataUnitTests::SideProvider_RegistryOwnsProviderLifetime()
     {
         MockXamlMetadataProvider appProvider;
@@ -904,13 +1038,14 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         const ULONG refCountBefore = GetRefCount(sideProvider.Get());
 
         auto registration = MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get());
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, registration.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, registration.Status);
 
         const ULONG refCountAfterRegister = GetRefCount(sideProvider.Get());
         VERIFY_ARE_EQUAL(refCountBefore + 1, refCountAfterRegister, L"The registry took a strong reference");
 
-        auto unregistration = MetadataAPI::UnregisterSideMetadataProvider(registration.ProviderId);
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, unregistration.Status);
+        auto unregistration = MetadataAPI::UnregisterSideMetadataProvider(sideProvider.Get());
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, unregistration.Status);
+        VERIFY_ARE_EQUAL(registration.Id, unregistration.Id);
         VERIFY_IS_TRUE(unregistration.Generation > registration.Generation, L"Unregistration is observable");
 
         const ULONG refCountAfterUnregister = GetRefCount(sideProvider.Get());
@@ -918,7 +1053,7 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_ARE_EQUAL(static_cast<size_t>(0), MetadataAPI::GetSideMetadataProviderCount());
     }
 
-    // 8. The generation is monotonic and observable, so a stale cache cannot hide a registration.
+    // 11. The generation is monotonic and observable, so a stale cache cannot hide a registration.
     void MetadataUnitTests::SideProvider_GenerationIsObservable()
     {
         MockXamlMetadataProvider appProvider;
@@ -937,11 +1072,11 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         auto secondInvalidation = MetadataAPI::InvalidateUnresolvedTypeCache(c_FullNameNewPage);
         VERIFY_IS_TRUE(secondInvalidation.Generation > invalidation.Generation, L"The generation is strictly monotonic");
 
-        auto unregistration = MetadataAPI::UnregisterSideMetadataProvider(registration.ProviderId);
+        auto unregistration = MetadataAPI::UnregisterSideMetadataProvider(sideProvider.Get());
         VERIFY_IS_TRUE(unregistration.Generation > secondInvalidation.Generation, L"Unregistration bumps the generation");
     }
 
-    // 9. Invalidation is surgical: only cached misses go.
+    // 12. Invalidation is surgical: only cached misses go.
     void MetadataUnitTests::SideProvider_InvalidationKeepsResolvedTypes()
     {
         wrl_wrappers::HStringReference appOwnedRef(L"HotReload.AppOwnedType");
@@ -984,12 +1119,12 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_ARE_EQUAL(resolvedType, resolvedTypeFinal, L"Bulk invalidation still leaves resolved types alone");
     }
 
-    // 10. The threading contract, stated as it actually is rather than as we would like it to be.
+    // 13. The threading contract, stated as it actually is rather than as we would like it to be.
     //
     //     CStaticLock is a CRITICAL_SECTION, so it is recursive for the owning thread. The registry
     //     mutates its own state under that lock and probes a candidate provider *without* it. The
     //     lookup path is a different story: MetadataAPI::TryGetClassInfoByFullName already holds the
-    //     lock across the call into the application's own provider, and side providers are consulted
+    //     lock across the call into the application's own provider, and registered providers are consulted
     //     from that same place, so they inherit that pre-existing behaviour. This test pins both
     //     halves down so the contract is explicit instead of assumed.
     void MetadataUnitTests::SideProvider_LockContractIsExplicit()
@@ -1000,25 +1135,27 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
 
         VERIFY_IS_FALSE(CStaticLock::IsLocked(), L"The test starts with no lock held");
 
-        auto sideProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto sideProvider = MockSideXamlMetadataProvider::Create()
+            ->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV1, Version=1.0.0.0");
 
         // (a) Registry state is mutated under CStaticLock, and the lock is not leaked.
         storageMock->LastAccessWasLocked = false;
         auto registration = MetadataAPI::RegisterSideMetadataProvider(sideProvider.Get());
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Registered, registration.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Succeeded, registration.Status);
         VERIFY_IS_TRUE(storageMock->LastAccessWasLocked, L"Registry state is mutated under CStaticLock");
         VERIFY_IS_FALSE(CStaticLock::IsLocked(), L"Registration does not leak the lock");
 
-        // (b) Drive a lookup so the registry records that this provider owns the name.
+        // (b) Drive a lookup so the registry records that this provider supplies the name.
         const CClassInfo* resolved = nullptr;
-        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNameNewPage, false, &resolved));
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetClassInfoByFullName(c_FullNamePluginWidget, false, &resolved));
         VERIFY_IS_FALSE(IsUnresolved(resolved));
-        VERIFY_IS_TRUE(sideProvider->GetXamlTypeByFullNameCallCount > 0, L"The side provider really was called");
+        VERIFY_IS_TRUE(sideProvider->GetXamlTypeByFullNameCallCount > 0, L"The registered provider really was called");
         VERIFY_IS_FALSE(CStaticLock::IsLocked(), L"Lookup does not leak the lock");
 
         // (c) The guarantee the registry itself makes: the conflict probe runs with no lock held, so
         //     a provider is free to call back into the metadata API while being validated.
-        auto conflictingProvider = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto conflictingProvider = MockSideXamlMetadataProvider::Create()
+            ->WithCustomType(L"Plugin.Widget", L"Plugin.Widget, PluginV2, Version=2.0.0.0");
         VERIFY_ARE_EQUAL(
             XamlMetadataProviderRegistrationStatus::Conflict,
             MetadataAPI::RegisterSideMetadataProvider(conflictingProvider.Get()).Status);
@@ -1028,16 +1165,16 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         // (d) The pre-existing behaviour the lookup path inherits, recorded so it is not a surprise.
         //     TryGetClassInfoByFullName takes DynamicMetadataStorageInstanceWithLock and keeps it
         //     across ImportClassInfoFromMetadataProvider, which is how the application's own provider
-        //     has always been invoked. A side provider is called from the same place, so a side
-        //     provider must be as re-entrancy tolerant as an application provider already has to be.
+        //     has always been invoked. A registered provider is called from the same place, so it
+        //     must be as re-entrancy tolerant as an application provider already has to be.
         //     If the lookup path is ever changed to drop the lock first, flip this assertion.
         VERIFY_IS_TRUE(
             sideProvider->WasCalledUnderStaticLock,
             L"Documented today's behaviour: the lookup path invokes providers with CStaticLock held");
     }
 
-    // 11. The result model never lies about a failure.
-    void MetadataUnitTests::SideProvider_RefusesNullAndUnknownId()
+    // 14. The result model never lies about a failure.
+    void MetadataUnitTests::SideProvider_RefusesNullAndUnknownProvider()
     {
         MockXamlMetadataProvider appProvider;
         SetUpAppProvider(appProvider, nullptr);
@@ -1046,13 +1183,22 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Refused, nullResult.Status);
         VERIFY_ARE_EQUAL(XamlMetadataProviderRefusalReason::NullProvider, nullResult.Reason);
         VERIFY_IS_FALSE(nullResult.IsRegistered());
-        VERIFY_ARE_EQUAL(c_invalidXamlMetadataProviderId, nullResult.ProviderId);
+        VERIFY_ARE_EQUAL(c_invalidXamlMetadataProviderId, nullResult.Id);
 
-        auto unknownId = MetadataAPI::UnregisterSideMetadataProvider(12345);
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Refused, unknownId.Status);
-        VERIFY_ARE_EQUAL(XamlMetadataProviderRefusalReason::UnknownProviderId, unknownId.Reason);
+        std::wstring message;
+        VERIFY_ARE_EQUAL(E_INVALIDARG, DescribeRegistrationResult(nullResult, message));
 
-        // Neither failure disturbed the registry.
+        auto nullRemoval = MetadataAPI::UnregisterSideMetadataProvider(nullptr);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Refused, nullRemoval.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRefusalReason::NullProvider, nullRemoval.Reason);
+
+        auto neverRegistered = MockSideXamlMetadataProvider::Create()->WithType(L"HotReload.NewPage");
+        auto unknown = MetadataAPI::UnregisterSideMetadataProvider(neverRegistered.Get());
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRegistrationStatus::Refused, unknown.Status);
+        VERIFY_ARE_EQUAL(XamlMetadataProviderRefusalReason::NotRegistered, unknown.Reason);
+        VERIFY_IS_FALSE(MetadataAPI::IsSideMetadataProviderRegistered(neverRegistered.Get()));
+
+        // None of these failures disturbed the registry.
         VERIFY_ARE_EQUAL(static_cast<size_t>(0), MetadataAPI::GetSideMetadataProviderCount());
     }
 

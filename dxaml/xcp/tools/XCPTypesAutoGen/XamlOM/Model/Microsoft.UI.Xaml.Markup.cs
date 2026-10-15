@@ -24,6 +24,38 @@ namespace Microsoft.UI.Xaml.Markup
         }
     }
 
+    // Process-wide list of extra IXamlMetadataProviders consulted after the application's own provider, so types
+    // from a library loaded while the app runs (for example a plugin) can be created from markup.
+    // Spec: docs\api-specs\XamlMetadataProviderRegistry\XamlMetadataProviderRegistry.md.
+    [DXamlIdlGroup("coretypes2")]
+    [Platform(typeof(Microsoft.UI.Xaml.WinUIContract), Microsoft.UI.Xaml.WinUIContract.Experimental)]
+    [TypeTable(IsExcludedFromDXaml = true, IsExcludedFromCore = true, IsExcludedFromNewTypeTable = true)]
+    [ClassFlags(IsFreeThreaded = true)]
+    [Guids(ClassGuid = "a4f1d2c7-5b3e-4f6a-9c8d-2e7b1a0f3d65")]
+    public static class XamlMetadataProviderRegistry
+    {
+        // Adds provider. Registering the same provider again does nothing. Throws when provider is null, or when it
+        // describes a type name that another registered provider already supplied as a different type.
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static void Register(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
+        {
+        }
+
+        // Removes provider. Returns false when it wasn't registered. Names only it supplied stop resolving; objects
+        // already created keep working.
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static Windows.Foundation.Boolean Unregister(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
+        {
+            return default(Windows.Foundation.Boolean);
+        }
+
+        [CodeGen(CodeGenLevel.IdlAndPartialStub)]
+        public static Windows.Foundation.Boolean IsRegistered(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider)
+        {
+            return default(Windows.Foundation.Boolean);
+        }
+    }
+
     [DXamlIdlGroup("coretypes2")]
     [CodeGen(CodeGenLevel.LookupOnly)]
     [TypeTable(IsExcludedFromDXaml = true, IsExcludedFromCore = true, IsExcludedFromNewTypeTable = true)]

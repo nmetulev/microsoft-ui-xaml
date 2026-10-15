@@ -21,9 +21,6 @@ namespace XamlHotReloadOverrides
     // so the parser, which also ships in binaries without the registry (GenXbf), can read it without linking it.
     inline std::atomic<std::uint32_t> g_markupGeneration{ 0 };
 
-    // Bumped when types become available after startup; parser "type not found" caches compare against it.
-    inline std::atomic<std::uint32_t> g_typeGeneration{ 0 };
-
     // Set the first time markup is replaced. Same link-free reasoning as above.
     using KindProbe = OverrideKind (*)(const WCHAR* uri, size_t count);
     inline std::atomic<KindProbe> g_kindProbe{ nullptr };

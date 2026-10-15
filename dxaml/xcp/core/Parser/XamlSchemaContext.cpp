@@ -15,6 +15,7 @@
 #include "MetadataAPI.h"
 #include <XStringUtils.h>
 #include <XStringBuilder.h>
+#include <XamlTypeCacheGenerations.h>
 
 using namespace Parser;
 
@@ -622,6 +623,13 @@ _Check_return_ HRESULT XamlSchemaContext::GetXamlProperty(
     }
 
     {
+        const std::uint32_t typesRemoved = XamlTypeCacheGenerations::g_typesRemoved.load(std::memory_order_relaxed);
+        if (typesRemoved != m_fullyQualifiedPropertyGeneration)
+        {
+            m_fullyQualifiedPropertyGeneration = typesRemoved;
+            m_mapFullyQualifiedProperty.clear();
+        }
+
         auto itXamlProperty = m_mapFullyQualifiedProperty.find(spFullyQualifiedPropertyName);
         if (itXamlProperty == m_mapFullyQualifiedProperty.end())
         {

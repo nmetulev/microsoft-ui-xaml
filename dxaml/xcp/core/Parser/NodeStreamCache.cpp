@@ -12,6 +12,7 @@
 #include <ParserAPI.h>
 #include <winuri.h>
 #include <XamlHotReloadOverrides.h>
+#include <XamlTypeCacheGenerations.h>
 
 using namespace Parser;
 
@@ -86,6 +87,8 @@ void XamlNodeStreamCacheManager::Flush()
 
 // Hot reload: once replaced markup changes (any thread), this thread's cached lookups and node lists are dropped on
 // its next use. Compiled .xbf files don't change while the app runs, so their mappings and readers stay cached.
+// Unregistering a metadata provider (XamlTypeCacheGenerations::g_typesRemoved) drops the node lists and the XBF
+// readers too, since both hold types resolved by name that may no longer resolve.
 void XamlNodeStreamCacheManager::SyncHotReloadGeneration()
 {
     const std::uint32_t generation = XamlHotReloadOverrides::g_markupGeneration.load(std::memory_order_relaxed);
@@ -93,6 +96,14 @@ void XamlNodeStreamCacheManager::SyncHotReloadGeneration()
     {
         m_hotReloadGeneration = generation;
         Flush();
+    }
+
+    const std::uint32_t typesRemoved = XamlTypeCacheGenerations::g_typesRemoved.load(std::memory_order_relaxed);
+    if (typesRemoved != m_typesRemovedGeneration)
+    {
+        m_typesRemovedGeneration = typesRemoved;
+        Flush();
+        IGNOREHR(ResetCachedXbfV2Readers());
     }
 }
 

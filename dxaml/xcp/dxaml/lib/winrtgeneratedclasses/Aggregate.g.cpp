@@ -758,6 +758,7 @@ using namespace DirectUI;
 #include "ProvideValueTargetProperty.g.cpp"
 #include "XamlBindingHelper.g.cpp"
 #include "XamlMarkupHelper.g.cpp"
+#include "XamlMetadataProviderRegistry.g.cpp"
 #include "XamlReader.g.cpp"
 #include "AddPagesEventArgs.g.cpp"
 #include "BeginPrintEventArgs.g.cpp"

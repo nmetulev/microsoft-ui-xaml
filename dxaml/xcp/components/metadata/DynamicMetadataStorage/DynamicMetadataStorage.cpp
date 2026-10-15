@@ -91,9 +91,7 @@ void DynamicMetadataStorage::ResetInstance()
     // resolved is about to be dropped from the caches below. Bump the generation so that anything
     // holding a registration result can see that its registration no longer applies.
 
-    m_sideMetadataProviders.clear();
-    m_sideMetadataProviderClaims.clear();
-    ++m_metadataProviderGeneration;
+    m_sideMetadataProviders.Clear();
 
     // Clear internal caches.
 

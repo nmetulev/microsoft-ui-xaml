@@ -444,6 +444,7 @@ namespace DirectUI
     _Check_return_ IActivationFactory* CreateActivationFactory_TogglePatternIdentifiers();
     _Check_return_ IActivationFactory* CreateActivationFactory_WindowPatternIdentifiers();
     _Check_return_ IActivationFactory* CreateActivationFactory_ItemAutomationPeer();
+    _Check_return_ IActivationFactory* CreateActivationFactory_XamlMetadataProviderRegistry();
     _Check_return_ IActivationFactory* CreateActivationFactory_XamlResourceReferenceFailedEventArgs();
     _Check_return_ IActivationFactory* CreateActivationFactory_EasingDoubleKeyFrame();
     _Check_return_ IActivationFactory* CreateActivationFactory_FadeInThemeAnimation();
@@ -1101,6 +1102,7 @@ ACTIVATION_FACTORY_MAP_BEGIN()
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Automation.TogglePatternIdentifiers"), &DirectUI::CreateActivationFactory_TogglePatternIdentifiers)
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Automation.WindowPatternIdentifiers"), &DirectUI::CreateActivationFactory_WindowPatternIdentifiers)
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Automation.Peers.ItemAutomationPeer"), &DirectUI::CreateActivationFactory_ItemAutomationPeer)
+    ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Markup.XamlMetadataProviderRegistry"), &DirectUI::CreateActivationFactory_XamlMetadataProviderRegistry)
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.XamlResourceReferenceFailedEventArgs"), &DirectUI::CreateActivationFactory_XamlResourceReferenceFailedEventArgs)
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Media.Animation.EasingDoubleKeyFrame"), &DirectUI::CreateActivationFactory_EasingDoubleKeyFrame)
     ACTIVATION_FACTORY_ENTRY(XSTRING_PTR_STORAGE(L"Microsoft.UI.Xaml.Media.Animation.FadeInThemeAnimation"), &DirectUI::CreateActivationFactory_FadeInThemeAnimation)
