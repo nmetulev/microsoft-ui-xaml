@@ -11,7 +11,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-<#  if(Model.IsPass1)
+<#=HotReloadMetadataUpdateHandler()#><#  if(Model.IsPass1)
     {
         WriteLine(TypeInfoDefinition.CSharpPass1StubMarker);
         WriteLine(TypeInfoDefinition.CSharpPass1WarningPragma);
@@ -158,7 +158,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
     {
         public <#=Globalize(KnownTypes.IXamlType)#> GetXamlTypeByType(global::System.Type type)
         {
-            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
+<#=HotReloadResetCall#>            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
             lock (_xamlTypeCacheByType) 
             { 
                 if (_xamlTypeCacheByType.TryGetValue(type, out xamlType))
@@ -201,7 +201,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
             {
                 return null;
             }
-            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
+<#=HotReloadResetCall#>            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
             lock (_xamlTypeCacheByType)
             {
                 if (_xamlTypeCacheByName.TryGetValue(typeName, out xamlType))
@@ -244,7 +244,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
             {
                 return null;
             }
-            <#=Globalize(KnownTypes.IXamlMember)#> xamlMember;
+<#=HotReloadResetCall#>            <#=Globalize(KnownTypes.IXamlMember)#> xamlMember;
             lock (_xamlMembers)
             {
                 if (_xamlMembers.TryGetValue(longMemberName, out xamlMember))
@@ -269,7 +269,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
         global::System.Collections.Generic.Dictionary<string, <#=Globalize(KnownTypes.IXamlMember)#>>
                 _xamlMembers = new global::System.Collections.Generic.Dictionary<string, <#=Globalize(KnownTypes.IXamlMember)#>>();
 
-<#      Output_TypeTables();            #>
+<#=HotReloadProviderMembers()#><#      Output_TypeTables();            #>
 
 <#      Output_Activators();            #>
 <#      Output_StaticInitializers();    #>

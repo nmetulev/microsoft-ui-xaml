@@ -153,6 +153,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             {
                 return null;
             }
+            if (_projectInfo.IsHotReloadCodeGen && !_isPass1 && _schemaInfo != null)
+            {
+                _schemaInfo.SortForHotReload();
+            }
             T4Base codeGenerator;
             codeGenerator = codeGenDelegate();
             codeGenerator.SetModel(_projectInfo, _schemaInfo,

@@ -51,6 +51,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             set { Debug.Assert(_typeIndex == -1); _typeIndex = value; }
         }
 
+        // Hot reload builds renumber the type table in a canonical order before code generation.
+        internal void ResetTypeIndex(int typeIndex)
+        {
+            _typeIndex = typeIndex;
+        }
+
         public bool IsValueType { get; set; }
 
         public String RefHat

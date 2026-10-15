@@ -79,6 +79,7 @@ namespace XAMLCompiler.BuildTasks.Core {
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CSharpPagePass1.HotReload.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CSharpPagePass2.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CSharpPagePass2.HotReload.cs`,
+        f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CSharpTypeInfoPass2.HotReload.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CSharpTypeInfoPass2.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/Definition.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/MoComCppAppPass1.cs`,
