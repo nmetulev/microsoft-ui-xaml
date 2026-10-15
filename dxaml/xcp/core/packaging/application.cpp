@@ -12,6 +12,7 @@
 #include <DependencyLocator.h>
 #include <DesignMode.h>
 #include "XamlTelemetry.h"
+#include <DOPointerCast.h>
 #include <XamlHotReloadOverrides.h>
 
 namespace
