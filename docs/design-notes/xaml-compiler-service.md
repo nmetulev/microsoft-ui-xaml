@@ -150,7 +150,8 @@ C# (with .NET hot reload applying the generated code):
    the previous image: in our tests the changes pass 1 makes to `.g.i.cs` (new fields) didn't affect
    pass 2, because it resolves named elements from the XAML.
 3. `CompilePass2([page], image, regenerateTypeInfo: false)` gives `.g.cs` and `.xbf`.
-4. If `XamlTypeInfoMayBeStale`, run `CompilePass2(AllXamlFiles, image, regenerateTypeInfo: true)`.
+4. If `XamlTypeInfoMayBeStale`, run `CompilePass2([page], image, regenerateTypeInfo: true)` (hot reload builds; see
+   [XamlTypeInfo](#4-xamltypeinfo)). Normal builds need `CompilePass2(AllXamlFiles, image, regenerateTypeInfo: true)`.
 5. Hand `.g.i.cs`, `.g.cs` (and `XamlTypeInfo.g.cs` if regenerated) to Roslyn, and the `.xbf` to
    WinUI.
 
@@ -343,8 +344,24 @@ Options considered:
   of the type or member name instead of the table index. Inserting a type no longer renames, and therefore deletes,
   every method after it, and delegates cached by WinUI keep pointing at live methods.
 - **Per save, XamlTypeInfo is not regenerated** (`regenerateTypeInfo: false`) unless `XamlTypeInfoMayBeStale` says a
-  page uses a type or member that isn't in it. A removal leaves a harmless superset until the next regeneration. A
-  replay cache of per-page type info would make the regeneration itself cheap, but isn't needed for correctness.
+  page uses a type or member that isn't in it; then `CompilePass2([page], image, regenerateTypeInfo: true)`. A removal
+  leaves a harmless superset until the next regeneration.
+- **Per-page type info cache** (`PageTypeInfoCache`, service only). Regenerating XamlTypeInfo reads every page for
+  type information.
+  - The service records each page's calls into the schema info (types and members by name), keyed by the page's
+    content hash. On later compiles it replays them for the pages it isn't compiling, instead of parsing,
+    validating and collecting them.
+  - A replay re-resolves every name against the current compile, applies each distinct call once, and falls back to
+    collecting the page when a name doesn't resolve or a project type it names changed shape (base type or declared
+    members).
+  - Reference reloads clear the cache. Hot reload (C#) only, where the sorted tables make the order of the calls
+    irrelevant. `XAML_COMPILER_SERVICE_NO_TYPEINFO_CACHE=1` turns it off.
+  - Gallery, every page compiled one at a time with `regenerateTypeInfo: true`: 1522/1522 identical to a build.
+    Button, ComboBox and ScrollViewer back to back, pass 2 with type info p50: 407 to 459 ms with the cache, 804 to
+    866 ms without it.
+  - What's left: replaying 473 distinct calls (140 to 160 ms, mostly member enumeration of user types), metadata
+    providers (55 ms), XamlTypeInfo generation (75 ms).
+  - Pages that are replayed don't report their binding AOT warnings again; their type information is unchanged.
 
 ### 5. Re-running InitializeComponent
 

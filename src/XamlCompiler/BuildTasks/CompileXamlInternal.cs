@@ -1092,7 +1092,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                             }
                             if (collectTypeInfo)
                             {
-                                failed |= !ProcessXamlFile_XamlTypeInfo(tif, ref xamlDomRoot);
+                                failed |= !CollectPageTypeInfo(tif, ref xamlDomRoot);
                             }
                         }
                         if (tif.OutOfDate() || forceRegenerate)
@@ -1119,6 +1119,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 // All the XAML files have been processed (and all XAML file errors reported).
                 // If there was a problem we can fail out now.
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "page loop");
+                if (TypeInfoPagesReplayed > 0)
+                {
+                    PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, String.Format(CultureInfo.InvariantCulture,
+                        "type info replayed for {0} pages ({1} calls; shapes {2:F0} ms, resolve {3:F0} ms, apply {4:F0} ms)", TypeInfoPagesReplayed, PageTypeInfoCache.AppliedRecords,
+                        PageTypeInfoCache.ShapeTime.Elapsed.TotalMilliseconds, PageTypeInfoCache.ResolveTime.Elapsed.TotalMilliseconds, PageTypeInfoCache.ApplyTime.Elapsed.TotalMilliseconds));
+                }
                 if (!result)
                 {
                     return false;
@@ -1535,6 +1541,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal static bool ReleaseChangedServiceReferences(ISet<string> noLongerReferenced, IList<string> released)
         {
             s_serviceReferencesReloaded = true;
+            PageTypeInfoCache.Clear();
             if (s_typeUniverse == null)
             {
                 return true;
@@ -1576,6 +1583,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public void UnloadReferences()
         {
+            PageTypeInfoCache.Clear();
             s_serviceLocalAssembly = null;
             if (s_typeUniverse != null)
             {
@@ -2302,8 +2310,72 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return projectInfo;
         }
 
-        private bool ProcessXamlFile_XamlTypeInfo(TaskItemFilename tif, ref XamlDomObject xamlDomRoot)
+        // Compiler service, C# hot reload builds: a page that isn't being compiled contributes the same type information as
+        // last time while its markup is unchanged, so it is replayed instead of parsed (see PageTypeInfoCache).
+        private bool UsePageTypeInfoCache => IsServiceCompile && IsHotReloadCodeGen && !IsPass1 && _localAssembly != null && !s_typeInfoCacheDisabled;
+        // Kill switch, and the A/B for measurements.
+        private static readonly bool s_typeInfoCacheDisabled = Environment.GetEnvironmentVariable("XAML_COMPILER_SERVICE_NO_TYPEINFO_CACHE") == "1";
+        private Dictionary<string, Assembly> _replayAssemblies;
+        private readonly Dictionary<Type, string> _replayShapes = new Dictionary<Type, string>();
+        private readonly HashSet<string> _replayedKeys = new HashSet<string>(StringComparer.Ordinal);
+        internal int TypeInfoPagesReplayed { get; private set; }
+
+        private bool CollectPageTypeInfo(TaskItemFilename tif, ref XamlDomObject xamlDomRoot)
         {
+            if (!UsePageTypeInfoCache || tif.IsApplication)
+            {
+                return ProcessXamlFile_XamlTypeInfo(tif, ref xamlDomRoot);
+            }
+
+            if (TypeInfoPagesReplayed == 0 && _replayAssemblies == null)
+            {
+                PageTypeInfoCache.ShapeTime.Reset();
+                PageTypeInfoCache.ResolveTime.Reset();
+                PageTypeInfoCache.ApplyTime.Reset();
+                PageTypeInfoCache.AppliedRecords = 0;
+            }
+            string contentHash = PageTypeInfoCache.HashFile(tif.SourceXamlFullPath);
+            if (!tif.OutOfDate())
+            {
+                if (_replayAssemblies == null)
+                {
+                    _replayAssemblies = new Dictionary<string, Assembly>(StringComparer.Ordinal);
+                    foreach (Assembly assembly in _loadedAssemblies.Where(a => a != null))
+                    {
+                        string name = assembly.GetName().Name;
+                        if (!_replayAssemblies.ContainsKey(name))
+                        {
+                            _replayAssemblies.Add(name, assembly);
+                        }
+                    }
+                    _replayAssemblies[_localAssembly.GetName().Name] = _localAssembly;
+                }
+                if (PageTypeInfoCache.TryReplay(tif.SourceXamlFullPath, contentHash, _typeInfoCollector.SchemaInfo, _schemaContext, _replayAssemblies, _localAssembly, _replayShapes, _replayedKeys))
+                {
+                    TypeInfoPagesReplayed++;
+                    return true;
+                }
+            }
+
+            var recorder = new TypeInfoRecorder();
+            _typeInfoCollector.SchemaInfo.Recorder = recorder;
+            bool ok;
+            try
+            {
+                ok = ProcessXamlFile_XamlTypeInfo(tif, ref xamlDomRoot);
+            }
+            finally
+            {
+                _typeInfoCollector.SchemaInfo.Recorder = null;
+            }
+            if (ok)
+            {
+                PageTypeInfoCache.Store(tif.SourceXamlFullPath, contentHash, recorder, _localAssembly, _replayShapes);
+            }
+            return ok;
+        }
+
+        private bool ProcessXamlFile_XamlTypeInfo(TaskItemFilename tif, ref XamlDomObject xamlDomRoot)        {
             if (!LoadAndValidateXamlDom(tif.SourceXamlFullPath, tif.ApparentRelativePath, out xamlDomRoot))
             {
                 return false;
