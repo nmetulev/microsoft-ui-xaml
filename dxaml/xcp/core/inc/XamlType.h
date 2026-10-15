@@ -6,6 +6,7 @@
 #include "IXamlSchemaObject.h"
 #include "TypeBits.h"
 #include "XamlTypeTokens.h"
+#include <XamlTypeCacheGenerations.h>
 
 class XamlSchemaContext;
 class XamlNamespace;
@@ -145,8 +146,35 @@ private:
     HRESULT GetBoolTypeBit(BoolTypeBits fTypeBit, bool& bValue);
     HRESULT RetrieveBoolTypeBits(const XamlBitSet<BoolTypeBits>& fTypeBits);
 
+    // Hot reload: once a tool reports changed types (XamlTypeCacheGenerations::g_typesChanged), properties this type
+    // didn't have may exist now, so the cached misses are forgotten. Found properties keep their identity.
+    void SyncChangedTypes()
+    {
+        const std::uint32_t generation = XamlTypeCacheGenerations::g_typesChanged.load(std::memory_order_relaxed);
+        if (generation != m_typesChangedGeneration)
+        {
+            m_typesChangedGeneration = generation;
+            ForgetMisses(m_PropertyCache);
+            ForgetMisses(m_DependencyPropertyCache);
+        }
+    }
+
+    static void ForgetMisses(containers::vector_map<xstring_ptr, XamlPropertyAndTypeToken>& cache)
+    {
+        containers::vector_map<xstring_ptr, XamlPropertyAndTypeToken> found;
+        for (const auto& entry : cache)
+        {
+            if (!entry.second.m_tpProperty.IsUnknown())
+            {
+                found.insert(entry);
+            }
+        }
+        cache = std::move(found);
+    }
+
     HRESULT TryGetPropertyFromCache(_In_ const xstring_ptr& inPropertyName, XamlPropertyAndTypeToken& tPropertyAndType)
     {
+        SyncChangedTypes();
         auto itPropertyAndType = m_PropertyCache.find(inPropertyName);
         if (itPropertyAndType == m_PropertyCache.end())
         {
@@ -172,6 +200,7 @@ private:
 
     HRESULT TryGetDependencyPropertyFromCache(_In_ const xstring_ptr& inPropertyName, XamlPropertyAndTypeToken& tPropertyAndType)
     {
+        SyncChangedTypes();
         auto itPropertyAndType = m_DependencyPropertyCache.find(inPropertyName);
         if (itPropertyAndType == m_DependencyPropertyCache.end())
         {
@@ -221,9 +250,10 @@ private:
     
     static const size_t invalidIndex = static_cast<size_t>(-1);
     size_t m_uiRuntimeIndex = invalidIndex;
+    std::uint32_t m_typesChangedGeneration = XamlTypeCacheGenerations::g_typesChanged.load(std::memory_order_relaxed);
 };
 
-class KnownXamlType 
+class KnownXamlType
     : public XamlType
 {
 

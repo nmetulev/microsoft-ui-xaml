@@ -158,5 +158,25 @@ interface IXamlHotReloadService2 : IXamlHotReloadService
         [out, size_is(, *count)] IInspectable*** components);
 };
 
+// IXamlHotReloadService3: tells the runtime which types' code changed. A tool QIs for it; without it, call
+// InvalidateTypeCaches (which on runtimes that have this interface also refreshes every changed type).
+[
+    object,
+    uuid(85B7546C-46F3-49C0-8AAD-D866BC9E86FC),
+    pointer_default(unique)
+]
+interface IXamlHotReloadService3 : IXamlHotReloadService2
+{
+    // The code of these types changed while the app runs (for example .NET hot reload's updated types): members may
+    // have been added. Each is a full name as the app's IXamlMetadataProvider knows it ("MyApp.Controls.StatCard").
+    // Names that haven't been resolved yet, or that never resolve, are ignored. The next member lookup that finds nothing
+    // asks the provider for the type again. The types keep their identity, and properties already found keep working
+    // for live objects, styles and bindings. *marked receives how many resolved types were marked.
+    HRESULT InvalidateTypes(
+        [in] UINT32 count,
+        [in, size_is(count)] LPCWSTR* fullNames,
+        [out] UINT32* marked);
+};
+
 cpp_quote("#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */ ")
 cpp_quote("#pragma endregion")

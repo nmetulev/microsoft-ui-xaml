@@ -20,4 +20,9 @@ namespace XamlTypeCacheGenerations
     // Names that resolved may no longer resolve: a registered provider was unregistered. Parser name -> type caches,
     // fully qualified property caches and cached node streams compare against it.
     inline std::atomic<std::uint32_t> g_typesRemoved{ 0 };
+
+    // Types that resolved may have new members: a tool updated their code while the app runs
+    // (IXamlHotReloadService::InvalidateTypeCaches / IXamlHotReloadService3::InvalidateTypes). The resolved types keep
+    // their identity; the parser's per-type property caches (which also remember "no such property") compare against it.
+    inline std::atomic<std::uint32_t> g_typesChanged{ 0 };
 }

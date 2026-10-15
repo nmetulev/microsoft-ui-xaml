@@ -91,7 +91,8 @@ counter on its next use, so no thread touches another's caches. The counters are
 | `.xbf` storage across flushes | `m_XbfResourceStorage`, `m_fileToStoredXbfResource` | file path / per core, until shutdown | replaced markup is never stored by file path | No. Built files can't change while the app runs. Replaced `.xbf` is kept until shutdown (see "Memory") |
 | XBFv2 readers | `m_XBFv2ReaderCache` | **buffer address** / until metadata reset | not needed | No. The key is an address, but every buffer stays alive in `m_XbfResourceStorage`, so an address is never reused. *measured*: cycle alternates contents 7 times |
 | Negative type lookups | `XamlXmlNamespace::m_mapKnownNotFoundTypes` | type name / per namespace | yes (`g_typesAdded`) | No |
-| Positive type and member lookups | `XamlXmlNamespace::m_mapNameToXamlType`, `XamlSchemaContext::m_mapFullyQualifiedProperty`; other `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | The first two, plus node lists and XBF readers, are dropped on `g_typesRemoved` (a provider was unregistered). Other resolved types stay | Not for markup edits: markup doesn't change what a type is. A type whose shape changes in place is a .NET hot reload question, out of scope here |
+| Positive type and member lookups | `XamlXmlNamespace::m_mapNameToXamlType`, `XamlSchemaContext::m_mapFullyQualifiedProperty`; other `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | The first two, plus node lists and XBF readers, are dropped on `g_typesRemoved` (a provider was unregistered). Other resolved types stay | Not for markup edits. For code edits that add members to a resolved type, see "Members added to a resolved type" |
+| Members a resolved custom type was found not to have | `CCustomClassInfo::m_spXamlType` (the provider's description from first use); `XamlType::m_PropertyCache` / `m_DependencyPropertyCache` (also remember misses); `m_mapFullyQualifiedProperty` | per type / process and per core | yes, on `g_typesChanged` (this branch) | Was **yes**: a DependencyProperty added by .NET hot reload stayed unknown to markup. *measured*: type-member-added |
 | Parse errors | core error service | per core | yes (cleared on the first `LoadComponent` after a change) | No |
 | Resource URI resolution | `ResourceManager::TryGetLocalResource` → `ModernResourceProvider` | URI / per call | the override wins before MRT | No XAML-side cache. MRT's own maps are opaque |
 
@@ -217,6 +218,37 @@ QI for it and fall back to a restart on older runtimes. It adds:
 only in stamped apps. Each entry holds a weak reference, the owning thread's `DispatcherQueue`, the URI and the root
 properties of the last load. Weak references are resolved only on the owning thread. Dead entries are dropped when the
 same URI loads again on that thread.
+
+### Members added to a resolved type
+
+*Measured*: type-member-added and type-member-added-targeted. When .NET hot reload adds a DependencyProperty to a
+control that markup already used, the regenerated XamlTypeInfo describes the new member, but markup setting it failed:
+
+- Text markup: "The property 'Hint' was not found in type 'DynCard'".
+- Compiled markup: "Failed to assign to property".
+
+Calling `InvalidateTypeCaches` didn't help, for two reasons:
+
+- `CCustomClassInfo` keeps the `IXamlType` from the type's first use, whose member list predates the edit.
+- The parser's per-type property cache remembers the miss.
+
+Fix:
+
+- `InvalidateTypeCaches` now also marks every resolved custom type as changed. `IXamlHotReloadService3::InvalidateTypes`
+  (new IID) marks only the named types, for tools that know which types an update touched.
+- Both bump `XamlTypeCacheGenerations::g_typesChanged`.
+- On the next member lookup that misses, `MetadataAPI::RefreshChangedCustomType` asks the providers for the type again,
+  by full name and in the same order as before, and swaps in the current `IXamlType`. The old one is kept alive until
+  shutdown, because callers of `GetXamlTypeNoRef` don't hold a reference.
+- Each parser `XamlType` drops its cached misses on its next lookup, and the fully qualified property cache is cleared.
+
+The type entry, its index and every property already found stay the same. Live objects, styles and bindings that hold
+them keep working; the probe checks an existing instance, an old member, and a style parsed before the update.
+
+Not covered:
+
+- A member whose type or kind changed keeps its first description.
+- Flags read once at import time (IsCollection, content property) aren't re-read.
 
 ## Not handled (proposals)
 

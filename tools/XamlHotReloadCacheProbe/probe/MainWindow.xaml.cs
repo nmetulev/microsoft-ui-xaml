@@ -4,6 +4,7 @@ using CacheProbe.Pages;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 
 namespace CacheProbe;
@@ -126,6 +127,8 @@ internal sealed class Runner
             case "resetsource-plain": await ResetSourcePlain(); break;
             case "implicit-code-swap": await ImplicitCodeSwap(); break;
             case "dict-reinit": await DictReinit(); break;
+            case "type-member-added": await TypeMemberAdded(targeted: false); break;
+            case "type-member-added-targeted": await TypeMemberAdded(targeted: true); break;
             case "reload-pages": await ReloadPages(offThread: false); break;
             case "reload-offthread": await ReloadPages(offThread: true); break;
             case "reload-window": await ReloadWindow(); break;
@@ -244,6 +247,113 @@ internal sealed class Runner
         await Settle();
         Check("fixed markup loads after a failure", Text(page, "PageMarker"), "marker-v2");
         Check("root Tag removed after the failure then fix", page.Tag, "<null>");
+    }
+
+    // A type that already resolved gains a member (as .NET hot reload adds a DependencyProperty and the regenerated
+    // XamlTypeInfo describes it). Markup that sets the new member must work after the tool says the type changed, and
+    // what resolved before (an instance, a style setter, a member) must keep working.
+    private async Task TypeMemberAdded(bool targeted)
+    {
+        const string ns = "xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:local=\"using:CacheProbe\"";
+        var provider = new DynProvider();
+        var providerPtr = WinRT.MarshalInterface<Microsoft.UI.Xaml.Markup.IXamlMetadataProvider>.FromManaged(provider);
+        int hr;
+        unsafe
+        {
+            hr = ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Vtbl[7])(_service, providerPtr);
+        }
+        Log($"REGISTER DynProvider (version 1: Label) hr=0x{hr:X8}");
+        Marshal.ThrowExceptionForHR(hr);
+
+        var before = (DynCard)XamlReader.Load($"<local:DynCard {ns} Label=\"first\" />");
+        var style = (Style)XamlReader.Load($"<Style {ns} TargetType=\"local:DynCard\"><Setter Property=\"Label\" Value=\"styled\" /></Style>");
+        _window.OldHost.Content = before;
+        await Settle();
+        Check("baseline Label from markup", before.Label, "first");
+        try
+        {
+            XamlReader.Load($"<local:DynCard {ns} Hint=\"too early\" />");
+            Log("NOTE Hint before the update loaded (unexpected)");
+        }
+        catch (Exception ex)
+        {
+            Log($"NOTE Hint before the update fails as in a build without it: {ex.Message.Split('\n').Last().Trim()}");
+        }
+
+        DynProvider.Version = 2;
+        if (targeted)
+        {
+            hr = InvalidateTypes(["CacheProbe.DynCard"], out var marked);
+            Log($"INVALIDATE InvalidateTypes(CacheProbe.DynCard) hr=0x{hr:X8} marked={marked}");
+            Check("InvalidateTypes marked", marked, "1");
+        }
+        else
+        {
+            unsafe
+            {
+                hr = ((delegate* unmanaged[Stdcall]<IntPtr, int>)Vtbl[8])(_service);
+            }
+            Log($"INVALIDATE InvalidateTypeCaches hr=0x{hr:X8}");
+        }
+
+        DynCard? after = null;
+        try
+        {
+            after = (DynCard)XamlReader.Load($"<local:DynCard {ns} Label=\"second\" Hint=\"from page\" />");
+        }
+        catch (Exception ex)
+        {
+            Log($"NOTE Hint after the update: {ex.Message.Replace('\n', ' ').Replace('\r', ' ')}");
+        }
+        Check("new member set from markup after the update", after?.Hint, "from page");
+        Check("existing member still set from markup", after?.Label, "second");
+
+        _window.NewHost.Content = after;
+        await Settle();
+        before.Hint = "set in code";
+        Check("live instance still works (new DP set in code)", before.Hint, "set in code");
+        before.Label = "changed";
+        Check("live instance still works (old member)", before.Label, "changed");
+        var styled = new DynCard { Style = style };
+        _window.NewHost.Content = styled;
+        await Settle();
+        Check("style parsed before the update still applies", styled.Label, "styled");
+        var styleAfter = (Style)XamlReader.Load($"<Style {ns} TargetType=\"local:DynCard\"><Setter Property=\"Hint\" Value=\"styled hint\" /></Style>");
+        var styled2 = new DynCard { Style = styleAfter };
+        _window.NewHost.Content = styled2;
+        await Settle();
+        Check("style setter for the new member", styled2.Hint, "styled hint");
+        GC.KeepAlive(provider);
+    }
+
+    private unsafe int InvalidateTypes(string[] names, out uint marked)
+    {
+        marked = 0;
+        var iid3 = new Guid("85B7546C-46F3-49C0-8AAD-D866BC9E86FC");
+        if (Marshal.QueryInterface(_service, in iid3, out var service3) < 0)
+        {
+            return NoInterface;
+        }
+        var pointers = names.Select(Marshal.StringToCoTaskMemUni).ToArray();
+        try
+        {
+            uint result;
+            int hr;
+            fixed (IntPtr* p = pointers)
+            {
+                hr = ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, uint*, int>)(*(void***)service3)[11])(service3, (uint)names.Length, p, &result);
+            }
+            marked = result;
+            return hr;
+        }
+        finally
+        {
+            foreach (var p in pointers)
+            {
+                Marshal.FreeCoTaskMem(p);
+            }
+            Marshal.Release(service3);
+        }
     }
 
     // A ResourceDictionary with x:Class (its own InitializeComponent) re-initialized with replaced markup.

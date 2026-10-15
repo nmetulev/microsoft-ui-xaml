@@ -74,6 +74,40 @@ public:
         m_spXamlType = nullptr;
     }
 
+    // Hot reload: the type's code changed (new members). The next member lookup that misses asks the metadata provider
+    // for this type again (MetadataAPI::RefreshChangedCustomType); the entry, its index and its properties stay.
+    void MarkChanged()
+    {
+        m_changed = true;
+    }
+
+    bool IsChanged() const
+    {
+        return m_changed;
+    }
+
+    // Swaps in the provider's current description of this type. Returns the previous one, which the caller keeps alive:
+    // another thread may still be using it.
+    ctl::ComPtr<xaml_markup::IXamlType> ReplaceXamlType(_In_opt_ xaml_markup::IXamlType* xamlType)
+    {
+        m_changed = false;
+        ctl::ComPtr<xaml_markup::IXamlType> previous = std::move(m_spXamlType);
+        if (xamlType)
+        {
+            m_spXamlType = xamlType;
+        }
+        else
+        {
+            m_spXamlType = previous;
+        }
+        return previous;
+    }
+
+    const xstring_ptr& GetFullNameStorage() const
+    {
+        return m_strFullName;
+    }
+
 private:
     CCustomClassInfo() = default;
 
@@ -85,5 +119,6 @@ private:
     KnownNamespaceIndex                                     m_nNamespaceIndex;
     bool                                                    m_isBindable{};
     bool                                                    m_isUnresolvedPlaceholder{};
+    bool                                                    m_changed{};
     std::uint64_t                                           m_sideProviderClaim{};
 };

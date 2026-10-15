@@ -149,6 +149,11 @@ namespace DirectUI
         // type resolved through it (CCustomClassInfo::GetSideProviderClaim), so unregistering forgets exactly those.
         SideMetadataProviderRegistry m_sideMetadataProviders;
 
+        // Hot reload: descriptions of changed types that were replaced by the provider's current ones
+        // (MetadataAPI::RefreshChangedCustomType). Kept until shutdown because GetXamlTypeNoRef callers don't hold a
+        // reference; one entry per refreshed type per update.
+        std::vector<ctl::ComPtr<xaml_markup::IXamlType>> m_retiredXamlTypes;
+
         GenerationBoundary m_valid = {};
     };
 
