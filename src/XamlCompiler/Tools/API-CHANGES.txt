@@ -48,3 +48,9 @@ v4 (reload with pass 1 inputs)
   + XamlReloadResult.KeptLocalAssembly; --serve reload responses carry "KeptLocalAssembly".
   * A service created from pass 1 inputs: CompilePass2 with an image now works (the image stands in for
     <OutputPath>intermediatexaml\<TargetName>.dll).
+
+v4, behavior (no API change)
+  * Builds with hot reload state record their code generation settings in <OutputPath>XamlHotReload\codegen.json
+    ({"enableXamlHotReload":true|false}). A service compile (either pass) whose inputs differ fails with WMC9998 at that
+    file instead of generating code the running build doesn't have. Typical cause: the host's input.json was written
+    without EnableXamlHotReload (pass EnableXamlHotReload="$(EnableXamlHotReload)" to InputSerializer).

@@ -63,6 +63,7 @@ internal static class Program
             case "edit": return EditScenario(args.Skip(1).ToArray());
             case "tombstones": return TombstoneSelfTest(args[1], args[2]);
             case "reload": return ReloadScenario(args[1], args[2], args[3], args[4], args[5]);
+            case "settings": return SettingsScenario(args[1], args.Length > 2 ? args[2] : null);
             default:
                 Console.WriteLine($"unknown command {args[0]}");
                 return 1;
@@ -200,7 +201,7 @@ internal static class Program
         if (args.Contains("--each-page"))
         {
             var totals = new List<(double Ms, string Page)>();
-            int failures = 0;
+            int failures = 0, unrequested = 0;
             foreach (string page in service.AllXamlFiles)
             {
                 XamlCompileResult p1 = service.CompilePass1(new[] { page });
@@ -209,11 +210,24 @@ internal static class Program
                 {
                     failures++;
                 }
+
+                // A one-page compile returns (and writes) only that page's files, plus XamlTypeInfo when regenerated.
+                string prefix = Path.GetFileNameWithoutExtension(page) + ".";
+                foreach (string file in p1.GeneratedText.Keys.Concat(p2.GeneratedText.Keys).Concat(p2.GeneratedXbf.Keys))
+                {
+                    string name = Path.GetFileName(file);
+                    if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !name.StartsWith("XamlTypeInfo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        unrequested++;
+                        failures++;
+                        Console.WriteLine($"  UNREQUESTED {Path.GetFileName(page)} returned {name}");
+                    }
+                }
                 totals.Add((p1.Elapsed.TotalMilliseconds + p2.Elapsed.TotalMilliseconds, Path.GetRelativePath(Path.GetDirectoryName(inputs.ProjectPath), page)));
             }
             totals.Sort((a, b) => a.Ms.CompareTo(b.Ms));
             double P(double q) => totals[(int)Math.Min(totals.Count - 1, Math.Round(q * (totals.Count - 1)))].Ms;
-            Console.WriteLine($"each page (pass1 + pass2), {totals.Count} pages, failures={failures}: min={totals[0].Ms:F0} p50={P(0.5):F0} p90={P(0.9):F0} p99={P(0.99):F0} max={totals[^1].Ms:F0} ms; slowest: {string.Join(", ", totals.Skip(totals.Count - 3).Select(t => $"{t.Page} {t.Ms:F0}"))}");
+            Console.WriteLine($"each page (pass1 + pass2), {totals.Count} pages, failures={failures}, files of other pages={unrequested}: min={totals[0].Ms:F0} p50={P(0.5):F0} p90={P(0.9):F0} p99={P(0.99):F0} max={totals[^1].Ms:F0} ms; slowest: {string.Join(", ", totals.Skip(totals.Count - 3).Select(t => $"{t.Page} {t.Ms:F0}"))}");
         }
 
         Console.WriteLine($"process total {processClock.Elapsed.TotalMilliseconds:F0} ms, working set {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB");
@@ -579,6 +593,18 @@ internal static class Program
         return 0;
     }
 
+    private static readonly HashSet<string> s_tombstoneBodyErrors = new HashSet<string> { "CS0161", "CS0177", "CS0127", "CS0126", "CS1622" };
+
+    private static List<Diagnostic> TombstoneBodyErrors(string code)
+    {
+        SyntaxTree tree = CSharpSyntaxTree.ParseText(code, new CSharpParseOptions(LanguageVersion.Latest));
+        var compilation = CSharpCompilation.Create("tombstones", new[] { tree }, new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        return tree.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error)
+            .Concat(compilation.GetDiagnostics().Where(d => s_tombstoneBodyErrors.Contains(d.Id)))
+            .ToList();
+    }
+
     private static int TombstoneSelfTest(string generatedDir, string outDir)
     {
         Type members = typeof(XamlCompilerService).Assembly.GetType("Microsoft.UI.Xaml.Markup.Compiler.HotReloadRetiredMembers", throwOnError: true);
@@ -607,6 +633,20 @@ internal static class Program
                 failures++;
                 Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: no-op={unchanged == code}, keys {keys.Count} -> {keysAfter.Count}");
             }
+
+            // The tombstones must compile: syntax, and the flow rules an inert body has to meet (every path returns, out
+            // parameters assigned, no value returned from void). Flow analysis runs without the WinUI references.
+            List<Diagnostic> bodyErrors = TombstoneBodyErrors(tombstoned);
+            if (bodyErrors.Count > 0)
+            {
+                failures++;
+                Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: {bodyErrors.Count} tombstone body error(s), first: {bodyErrors[0]}");
+            }
+            if (tombstoned.Contains("throw null", StringComparison.Ordinal))
+            {
+                failures++;
+                Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: a tombstone still throws");
+            }
             files++;
             entries += keys.Count;
             restored += tombstoned != stripped ? 1 : 0;
@@ -616,6 +656,31 @@ internal static class Program
         }
         Console.WriteLine($"tombstone self-test: {files} files, {entries} inventoried members, {restored} files rebuilt from tombstones, {failures} failures, {w.ElapsedMilliseconds} ms");
         return failures == 0 ? 0 : 1;
+    }
+    // The build records its code generation settings (XamlHotReload\codegen.json). A service whose inputs differ (for
+    // example an input.json without EnableXamlHotReload) stops with WMC9998 in both passes; one whose inputs match compiles.
+    private static int SettingsScenario(string buildInputJson, string outputPath)
+    {
+        CompilerInputs build = ReadInputs(buildInputJson);
+        string marker = Path.Combine(Path.GetDirectoryName(build.ProjectPath), build.OutputPath, "XamlHotReload", "codegen.json");
+        Console.WriteLine($"settings: the build recorded {(File.Exists(marker) ? File.ReadAllText(marker).Trim() : "(nothing)")}");
+        int Run(string label, bool flip, bool expectSuccess)
+        {
+            CompilerInputs inputs = ReadInputs(buildInputJson);
+            if (flip)
+            {
+                inputs.EnableXamlHotReload = !inputs.EnableXamlHotReload;
+            }
+            using var service = new XamlCompilerService(inputs, outputPath);
+            string page = service.AllXamlFiles.First();
+            XamlCompileResult p1 = service.CompilePass1(new[] { page });
+            XamlCompileResult p2 = service.CompilePass2(new[] { page }, null, regenerateTypeInfo: false);
+            bool flagged = p1.Diagnostics.Concat(p2.Diagnostics).Any(d => d.IsError && d.Code == "WMC9998" && (d.File ?? "").EndsWith("codegen.json", StringComparison.OrdinalIgnoreCase));
+            bool ok = expectSuccess ? p1.Success && p2.Success && !flagged : !p1.Success && !p2.Success && flagged;
+            Console.WriteLine($"  {label}: EnableXamlHotReload={inputs.EnableXamlHotReload}, pass 1 ok={p1.Success}, pass 2 ok={p2.Success}, settings error={flagged}: {(ok ? "as expected" : "UNEXPECTED")}");
+            return ok ? 0 : 1;
+        }
+        return Run("mismatched inputs", flip: true, expectSuccess: false) + Run("matching inputs", flip: false, expectSuccess: true) == 0 ? 0 : 1;
     }
 private static int ReloadScenario(string buildInputJson, string outputPath, string baselineDir, string referenceName, string olderCopy)
     {

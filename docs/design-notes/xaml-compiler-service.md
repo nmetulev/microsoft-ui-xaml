@@ -268,10 +268,19 @@ to `$(EnableXamlHotReload)`. The service passes the build's value through, so a 
 service compile generate the same shape.
 
 - Stable connection IDs (Prototype A) apply to every language: C++ also stops renumbering when an element is inserted.
+- Hot reload builds always leave the pass 2 compiler inputs (`input.json`, next to the generated files: C#
+  `obj\...\input.json`, C++ `Generated Files\input.json`) for a host to start the service from. `dotnet build` (the
+  executable compiler) always wrote them; Visual Studio's MSBuild (the in-process compiler) now writes them too when
+  `EnableXamlHotReload` is true. Check: `src\XamlCompiler\Tools\CheckXamlHotReloadInputs.ps1`.
 - Sections 2 to 5 below are C# only (`IsHotReloadCodeGen`). C++/WinRT gets its own changes (`IsCppHotReloadCodeGen`,
   [section 6](#6-cwinrt)) and a deterministic lookup in its `static_assert` list (see [Other changes](#other-changes)).
 
 ### 1. Stable, append-only connection IDs and tombstones
+
+**Settings check.** The build also records the code generation settings that shape its output
+(`XamlHotReload\codegen.json`, `{"enableXamlHotReload":…}`). A service compile, either pass, whose inputs differ fails
+with WMC9998 at that file instead of generating code the running build doesn't have. A host whose `input.json` left
+out `EnableXamlHotReload` used to get, for example, C++ `static_assert`s and `.g.h` members that differ from the build.
 
 **Where the state lives.** The connection ID ledger and the member inventories are in the build's output folder
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
@@ -296,8 +305,12 @@ of the generated C# records the fields and nested types of each class, per gener
 back before the closing brace of its container:
 
 - A field keeps its declaration without its initializer (constants stay as they are).
-- A type keeps its header, fields and nested types. Its method, constructor and accessor bodies become
-  `{ throw null; }`, and expression bodies become `=> throw null;`.
+- A type keeps its header, fields and nested types. Its method, constructor and accessor bodies are inert, because
+  live objects created before the update can still call them: a list calls `IDataTemplateComponent.Recycle`,
+  `ProcessBindings` and `Update` on the old Bindings object of every container it recycles or reuses. Void members,
+  constructors and `set`/`add`/`remove` accessors get `{ }`. Other members get `return default;` (`=> default;` for
+  expression bodies), with `out` parameters assigned first: `nextPhase = -1` for `ProcessBindings` ("no more
+  phases"), `default` otherwise. An `int ProcessBindings` returns -1.
 - The block is wrapped in `#pragma warning disable` / `restore`, with a comment.
 - A live member with the same name always wins.
 - A build records the inventory but puts nothing back: it is the new baseline, and the app restarts from it.
@@ -306,7 +319,9 @@ The order of the restored members is deterministic (sorted by key).
 
 **Template Bindings classes.** A template's Bindings classes are named with a hash of their data type
 (`Page_obj20_Bindings_1a2b3c4d`), so an `x:DataType` change adds new classes instead of changing field types
-(ENC0009). The old classes become tombstones.
+(ENC0009). The old classes become tombstones. The `obj20` is the connection ID of the template's root element, so
+wrapping that root (for example a `TextBlock` into a `StackPanel`) also renames the class. The wrapped element keeps
+its own ID.
 
 ### 2. No redundant default initializers
 
@@ -472,7 +487,8 @@ WinUI Gallery, hot reload mode:
   `--typeinfo skip` and with `--typeinfo all`.
 - **Tombstone self-test** (`XamlCompilerServiceHost tombstones`): 388 generated files, 5309 recorded members. Each
   file is stripped of every field and nested type and restored from tombstones. The app compiles, and the
-  metadata-only image is the same size (928,768 bytes).
+  metadata-only image is the same size (928,768 bytes). The tombstones also compile on their own (no CS0161, CS0177,
+  CS0127, CS0126 or CS1622) and contain no `throw`: 291 files rebuilt from tombstones, 0 failures.
 - **C++ (Simple):** the fixed point is 38 of 38 identical.
 
 Normal builds (flags off) are unchanged: Gallery 777 of 777 and C++ 27 of 27 identical to the unmodified compiler's
