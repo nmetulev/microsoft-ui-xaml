@@ -65,9 +65,18 @@ package cache isolated for each.
 
 ## Inventory
 
-"Refreshed" means the prototype already handles the cache on the per-thread generation counter
-(`XamlHotReloadOverrides::g_markupGeneration` / `g_typeGeneration`). Each UI thread compares the counter on its next
-use, so no thread touches another's caches.
+"Refreshed" means the cache is already refreshed on a process-wide generation counter. Each UI thread compares the
+counter on its next use, so no thread touches another's caches. The counters are:
+
+- `XamlHotReloadOverrides::g_markupGeneration`: bumped when replaced markup changes.
+- `XamlTypeCacheGenerations::g_typesAdded` and `g_typesRemoved` (`core/inc/XamlTypeCacheGenerations.h`): these come
+  from the metadata provider registry (branch `nmetulev-metadata-provider-api`) and replace the prototype's
+  `g_typeGeneration`.
+  - `g_typesAdded` is bumped by `XamlMetadataProviderRegistry.Register`, by `Unregister`, and by the service's
+    `InvalidateTypeCaches`.
+  - `g_typesRemoved` is bumped only by `Unregister`.
+
+  See `docs/api-specs/XamlMetadataProviderRegistry/XamlMetadataProviderRegistry.md`, "Parser caches".
 
 ### Markup loading (parser, XBF, URIs)
 
@@ -77,8 +86,8 @@ use, so no thread touches another's caches.
 | URI → `.xbf` resource | `m_UriToXbfResourceMap` | URI / per core | yes | No. *measured*: cycle, loose |
 | `.xbf` storage across flushes | `m_XbfResourceStorage`, `m_fileToStoredXbfResource` | file path / per core, until shutdown | replaced markup is never stored by file path | No. Built files can't change while the app runs. Replaced `.xbf` is kept until shutdown (see "Memory") |
 | XBFv2 readers | `m_XBFv2ReaderCache` | **buffer address** / until metadata reset | not needed | No. The key is an address, but every buffer stays alive in `m_XbfResourceStorage`, so an address is never reused. *measured*: cycle alternates contents 7 times |
-| Negative type lookups | `XamlXmlNamespace::m_mapKnownNotFoundTypes` | type name / per namespace | yes (`g_typeGeneration`) | No |
-| Positive type and member lookups | `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | resolved types stay | Not for markup edits: markup doesn't change what a type is. A type whose shape changes in place is a .NET hot reload question, out of scope here |
+| Negative type lookups | `XamlXmlNamespace::m_mapKnownNotFoundTypes` | type name / per namespace | yes (`g_typesAdded`) | No |
+| Positive type and member lookups | `XamlXmlNamespace::m_mapNameToXamlType`, `XamlSchemaContext::m_mapFullyQualifiedProperty`; other `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | The first two, plus node lists and XBF readers, are dropped on `g_typesRemoved` (a provider was unregistered). Other resolved types stay | Not for markup edits: markup doesn't change what a type is. A type whose shape changes in place is a .NET hot reload question, out of scope here |
 | Parse errors | core error service | per core | yes (cleared on the first `LoadComponent` after a change) | No |
 | Resource URI resolution | `ResourceManager::TryGetLocalResource` → `ModernResourceProvider` | URI / per call | the override wins before MRT | No XAML-side cache. MRT's own maps are opaque |
 
