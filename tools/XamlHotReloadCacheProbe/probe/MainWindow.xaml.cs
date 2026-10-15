@@ -189,7 +189,19 @@ internal sealed class Runner
         Check("baseline window marker", Text((FrameworkElement)window.Content, "WindowMarker"), "window-v1");
         Check("baseline window title", window.Title, "probe-v1");
         const string uri = "ms-appx:///Pages/ProbeWindow.xaml";
-        SetMarkup(uri, "V2", "ProbeWindow.xaml");
+        if (_binary)
+        {
+            SetMarkup(uri, "V2", "ProbeWindow.xaml");
+        }
+        else
+        {
+            // As saved by the user: the variant omits x:Class only so the build doesn't compile a second class.
+            var text = File.ReadAllText(Path.Combine(ProjectDir, "Variants", "V2", "ProbeWindow.xaml"))
+                .Replace("<Window", "<Window x:Class=\"CacheProbe.Pages.ProbeWindow\"");
+            var temp = Path.Combine(Path.GetTempPath(), "ProbeWindow.v2.xaml");
+            File.WriteAllText(temp, text);
+            SetMarkupFile(uri, temp, binary: false);
+        }
         var (hr, count) = ReloadComponents(uri);
         Log($"RELOAD {uri} hr=0x{hr:X8} count={count}");
         if (hr < 0)
