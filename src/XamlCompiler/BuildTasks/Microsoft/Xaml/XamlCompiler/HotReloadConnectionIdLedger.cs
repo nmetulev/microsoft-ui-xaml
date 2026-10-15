@@ -138,6 +138,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 foreach (string path in Directory.GetFiles(ledgerDirectory, "*.xaml.connids.json")
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.xaml.hotreload.json"))
+                    .Concat(Directory.GetFiles(ledgerDirectory, "*.members.json"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "connection-ids.pending")))
                 {
                     File.Delete(path);
@@ -208,7 +209,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
         }
 
-        private static string CreateFileStem(string className)
+        internal static string CreateFileStem(string className)
         {
             string shortName = className;
             int separator = className.LastIndexOf('.');
