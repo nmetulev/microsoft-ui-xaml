@@ -70,6 +70,16 @@ AutoSuggestBox::AutoSuggestBox(){}
 
 AutoSuggestBox::~AutoSuggestBox()
 {
+    // A running timer outlives this control (the dispatcher holds it) and its Tick handler calls back into it.
+    if (auto spTextChangedEventTimer = m_tpTextChangedEventTimer.GetSafeReference())
+    {
+        IGNOREHR(spTextChangedEventTimer->Stop());
+        if (m_epTextChangedEventTimerTickEventHandler)
+        {
+            IGNOREHR(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(spTextChangedEventTimer.Get()));
+        }
+    }
+
     if (m_tpInputPane)
     {
         if (m_sipEvents[0].value != 0)
@@ -211,6 +221,14 @@ AutoSuggestBox::OnApplyTemplate()
     {
         IFC_RETURN(ClearTextBoxQueryButtonIcon());
         IFC_RETURN(m_epQueryButtonClickEventHandler.DetachEventHandler(m_tpTextBoxQueryButtonPart.Get()));
+    }
+
+    // The timer outlives templates and is attached again below. Without this, each new template left the previous Tick
+    // handler on the timer; the control only neuters the latest one when it's destroyed, so the others could call into a
+    // freed control.
+    if (m_tpTextChangedEventTimer)
+    {
+        IFC_RETURN(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(m_tpTextChangedEventTimer.Get()));
     }
 
     m_tpSuggestionsPart.Clear();
@@ -442,6 +460,13 @@ AutoSuggestBox::OnUnloaded(_In_ IInspectable* /*pSender*/, _In_ xaml::IRoutedEve
     {
         m_isOverlayVisible = false;
         IFC_RETURN(TeardownOverlayState());
+    }
+
+    // A pending TextChanged isn't raised for a box that left the tree (it may be released before the timer ticks).
+    // The handler stays attached, so the box works again if it is put back in a tree.
+    if (!IsInLiveTree() && m_tpTextChangedEventTimer)
+    {
+        IFC_RETURN(m_tpTextChangedEventTimer->Stop());
     }
 
     return S_OK;
@@ -2276,6 +2301,11 @@ _Check_return_ HRESULT AutoSuggestBox::OnTextChangedEventTimerTick(
     _In_ IInspectable* /*pArgs*/)
 {
     HRESULT hr = S_OK;
+
+    if (!m_tpTextChangedEventTimer)
+    {
+        goto Cleanup;
+    }
 
     IFC(m_tpTextChangedEventTimer->Stop());
 
