@@ -34,6 +34,12 @@ namespace XamlHotReloadOverrides
         return probe ? probe(uri, count) : OverrideKind::None;
     }
 
+    // True once any markup was replaced in this process. Until then nothing hot reload adds changes behavior.
+    inline bool IsActive()
+    {
+        return g_kindProbe.load(std::memory_order_relaxed) != nullptr;
+    }
+
     // Sets *ppResource to a resource holding the replaced markup for pUri, or nullptr when it has none.
     _Check_return_ HRESULT TryGetOverrideResource(_In_ IPALUri* pUri, _Outptr_result_maybenull_ IPALResource** ppResource);
 

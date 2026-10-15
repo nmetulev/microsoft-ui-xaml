@@ -23,6 +23,16 @@
 using namespace Theming;
 using namespace DirectUI;
 
+namespace
+{
+    // Set while InvalidateImplicitStyles re-evaluates every implicit style in a subtree (a dictionary with implicit
+    // styles was added or replaced). That pass calls UpdateImplicitStyle(nullptr, nullptr, forceUpdate = true), the
+    // same arguments XamlDiagnostics uses to unapply implicit styles (CResourceDictionary::NotifyImplicitStyleChanged
+    // with ForcedByDiagnotics and no style). With diagnostics attached the re-evaluation must still look styles up
+    // again, or every element in the subtree loses its implicit style.
+    thread_local bool t_reevaluatingAllImplicitStyles = false;
+}
+
 CFrameworkElement::CFrameworkElement(_In_ CCoreServices *pCore)
     : CUIElement(pCore)
     , m_eImplicitStyleProvider(ImplicitStyleProvider::None)
@@ -685,7 +695,7 @@ CFrameworkElement::UpdateImplicitStyle(
             auto runtimeEnabledFeatureDetector = RuntimeFeatureBehavior::GetRuntimeEnabledFeatureDetector();
 
             // XamlDiagnostics signals it modified the implicit style by passing in the same style as pOldStyle and pNewStyle.
-            const bool xamlDiagRefresh = bForceUpdate && (pOldStyle == pNewStyle) && runtimeEnabledFeatureDetector->IsFeatureEnabled(RuntimeFeatureBehavior::RuntimeEnabledFeature::XamlDiagnostics);
+            const bool xamlDiagRefresh = bForceUpdate && (pOldStyle == pNewStyle) && !t_reevaluatingAllImplicitStyles && runtimeEnabledFeatureDetector->IsFeatureEnabled(RuntimeFeatureBehavior::RuntimeEnabledFeature::XamlDiagnostics);
             if (!xamlDiagRefresh || pNewStyle)
             {
                 // pNewStyle may not be applicable to this item, but one of the children, so re-ensure this implicit style if the one
@@ -743,6 +753,9 @@ CFrameworkElement::InvalidateImplicitStyles(
         }
         else
         {
+            const bool wasReevaluating = t_reevaluatingAllImplicitStyles;
+            t_reevaluatingAllImplicitStyles = true;
+            auto restore = wil::scope_exit([wasReevaluating]() { t_reevaluatingAllImplicitStyles = wasReevaluating; });
             IFC_RETURN(pElement->UpdateImplicitStyle(NULL, NULL, /*bForceUpdate*/TRUE));
         }
     }

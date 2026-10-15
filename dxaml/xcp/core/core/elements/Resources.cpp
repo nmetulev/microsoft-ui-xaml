@@ -59,6 +59,7 @@ CResourceDictionary::CResourceDictionary(_In_ CCoreServices* pCore)
     , m_isHighContrast(false)
     , m_useAppResourcesForThemeRef(false)
     , m_isGlobal(false)
+    , m_filledByComponentMarkup(false)
 #if DBG
     , m_processingBulkUndeferral(false)
 #endif
@@ -1126,6 +1127,9 @@ CResourceDictionary::Clear()
     m_keyByIndex.clear();
     IFC(InvalidateImplicitStyles(NULL));
     m_pDeferredResources.reset();
+    // Counts keys undeferred from m_pDeferredResources: a dictionary loaded again (Source set again, or replaced
+    // markup run again) must not subtract the previous load's undeferred keys from the new one's.
+    m_undeferredKeyCount = 0;
 
     if (m_bIsThemeDictionaries)
     {
@@ -1139,6 +1143,24 @@ Cleanup:
     }
 
     return hr;
+}
+
+// Hot reload: empties a component's own dictionary (the component is a ResourceDictionary, such as one with x:Class)
+// before its replaced markup is loaded into it again.
+_Check_return_ HRESULT CResourceDictionary::ResetForComponentReload()
+{
+    IFC_RETURN(Clear());
+    m_pRuntimeDeferredKeys.reset();
+    if (m_pMergedDictionaries)
+    {
+        IFC_RETURN(m_pMergedDictionaries->Clear());
+    }
+    if (m_pThemeDictionaries)
+    {
+        IFC_RETURN(m_pThemeDictionaries->Clear());
+    }
+    InvalidateNotFoundCache(true);
+    return S_OK;
 }
 
 _Check_return_
