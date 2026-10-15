@@ -225,7 +225,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // left out EnableXamlHotReload.
         private bool CheckHotReloadCodeGenSettings(bool writeSettings)
         {
-            string folder = Path.Combine(HotReloadStateFolder, "XamlHotReload");
+            string folder = HotReloadStatePaths.GetFolder(HotReloadStateFolder);
             string marker = Path.Combine(folder, "codegen.json");
             string settings = "{\"enableXamlHotReload\":" + (EnableXamlHotReload ? "true" : "false") + "}";
             if (IsServiceCompile)
@@ -247,8 +247,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             if (!File.Exists(marker) || !String.Equals(File.ReadAllText(marker).Trim(), settings, StringComparison.Ordinal))
             {
-                Directory.CreateDirectory(folder);
-                File.WriteAllText(marker, settings + Environment.NewLine);
+                HotReloadJsonFile.WriteText(marker, settings + Environment.NewLine);
             }
             return true;
         }
@@ -3613,6 +3612,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         internal void LogError_XamlInternalError(Exception e, string file)
         {
+            // Not an internal error: the project's folder is too deep for this process (see HotReloadStatePaths).
+            if (e is HotReloadStatePathTooLongException tooLong)
+            {
+                LogError("CompileXaml", ErrorCode.WMC9998, null, tooLong.StatePath, 0, 0, 0, 0, tooLong.Message);
+                return;
+            }
             LogUnhandledException(XamlCompilerResources.XamlInternlError, ErrorCode.WMC9999, e, file);
         }
 

@@ -286,6 +286,12 @@ out `EnableXamlHotReload` used to get, for example, C++ `static_assert`s and `.g
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.
 
+The files are named by a 12-hex hash of the class name (`<hash>.connids.json`, `<hash>.hotreload.json`,
+`<hash>.i.g.cs.members.json`, at most 40 characters), and atomic writes go through `~<n>.tmp` in the same folder, so a
+temporary path is never longer than the file's own. When the folder is deeper than 218 characters, the compiler
+addresses it as `\\?\<path>`: XamlCompiler.exe runs on .NET Framework, which can't open longer paths otherwise, even
+with LongPathsEnabled. A state path that still fails is reported as WMC9998 with its length, not as an internal error.
+
 - **Bound-signature keys** for unnamed elements that bind or handle events (the ones that get connection IDs): their
   namescope, type, and canonical `x:Bind` and handler text, plus their order among identical elements in the namescope.
   Inserting other elements, or wrapping or moving the element, keeps its ID; editing its binding gives it a new one.
@@ -301,7 +307,7 @@ compiles that follow it continue one history. Clean deletes the folder.
 
 **Tombstones.** .NET hot reload can't delete a field or a type (ENC0033). After codegen, a declaration-level scanner
 of the generated C# records the fields and nested types of each class, per generated file, in
-`<Class>.<hash>.<ext>.members.json`. On a service compile, any recorded member the new code no longer declares is put
+`<hash>.<ext>.members.json`. On a service compile, any recorded member the new code no longer declares is put
 back before the closing brace of its container:
 
 - A field keeps its declaration without its initializer (constants stay as they are).
