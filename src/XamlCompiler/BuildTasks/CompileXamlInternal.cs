@@ -2214,6 +2214,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             projectInfo.IsLibrary = IsOutputTypeLibrary || IsOutputTypeWinMd;
             projectInfo.ShouldGenerateDisableXBind = this.EnableXBindDiagnostics;
             projectInfo.IsHotReloadCodeGen = this.IsHotReloadCodeGen;
+            projectInfo.IsHotReloadBuild = this.EnableXamlHotReload;
             projectInfo.EnableTypeInfoReflection = EnableTypeInfoReflection;
             projectInfo.EnableDefaultValidationContextGeneration = EnableDefaultValidationContextGeneration;
 

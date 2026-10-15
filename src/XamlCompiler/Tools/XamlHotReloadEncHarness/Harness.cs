@@ -221,13 +221,17 @@ internal sealed class Harness
     private async Task<string?> CompileXamlAsync(string path, StepResult result)
     {
         XamlCompileResult p1 = _service!.CompilePass1(new[] { path });
+        result.Pass1Ms += p1.Elapsed.TotalMilliseconds;
         if (!p1.Success)
         {
             return "pass 1: " + FirstError(p1);
         }
         ApplyGenerated(p1);
+        Stopwatch emit = Stopwatch.StartNew();
         byte[]? image = await EmitImageAsync(_solution!);
+        result.EmitMs += emit.Elapsed.TotalMilliseconds;
         XamlCompileResult p2 = _service.CompilePass2(new[] { path }, image, regenerateTypeInfo: false);
+        result.Pass2Ms += p2.Elapsed.TotalMilliseconds;
         if (!p2.Success)
         {
             return "pass 2: " + FirstError(p2);
@@ -236,6 +240,7 @@ internal sealed class Harness
         if (p2.XamlTypeInfoMayBeStale)
         {
             XamlCompileResult full = _service.CompilePass2(_service.AllXamlFiles, image, regenerateTypeInfo: true);
+            result.TypeInfoMs += full.Elapsed.TotalMilliseconds;
             if (!full.Success)
             {
                 return "XamlTypeInfo: " + FirstError(full);
@@ -555,12 +560,13 @@ internal sealed class Harness
     private string Report()
     {
         var s = new StringBuilder();
-        s.AppendLine($"| step | expected | outcome | XAML compile (ms) | EnC (ms) | details |");
+        s.AppendLine($"| step | expected | outcome | per save (ms): pass 1 + emit + pass 2 (+ XamlTypeInfo) | EnC (ms) | details |");
         s.AppendLine("|---|---|---|---|---|---|");
         foreach (StepResult r in _results)
         {
             string details = r.Details + (r.Notes.Count > 0 ? " (" + string.Join("; ", r.Notes) + ")" : "");
-            s.AppendLine($"| {r.Id} | {r.Expect} | {r.Outcome} | {r.XamlMs:F0} | {r.EncMs:F0} | {details.Replace("|", "\\|")} |");
+            string phases = r.Pass1Ms + r.Pass2Ms > 0 ? $" ({r.Pass1Ms:F0} + {r.EmitMs:F0} + {r.Pass2Ms:F0}{(r.TypeInfoMs > 0 ? $" + {r.TypeInfoMs:F0}" : "")})" : "";
+            s.AppendLine($"| {r.Id} | {r.Expect} | {r.Outcome} | {r.XamlMs:F0}{phases} | {r.EncMs:F0} | {details.Replace("|", "\\|")} |");
         }
         int applied = _results.Count(r => r.Outcome == "applied" || r.Outcome == "no change");
         s.AppendLine();
@@ -585,6 +591,10 @@ internal sealed class StepResult
     public string Details { get; set; } = "";
     public double XamlMs { get; set; }
     public double EncMs { get; set; }
+    public double Pass1Ms { get; set; }
+    public double EmitMs { get; set; }
+    public double Pass2Ms { get; set; }
+    public double TypeInfoMs { get; set; }
     public List<string> Notes { get; } = new();
 
     public StepResult With(string outcome, Stopwatch clock, string details)

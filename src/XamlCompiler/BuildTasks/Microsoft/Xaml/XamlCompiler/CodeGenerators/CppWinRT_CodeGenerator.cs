@@ -10,6 +10,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
 {
     internal class CppWinRT_CodeGenerator<T> : NativeCodeGenerator<T>
     {
+        // The name to look up in the projected primitive table. XamlType.ToString() includes the XAML namespace once something
+        // has initialized it, which depends on what else the same compile looked at; hot reload builds use the CLR name so a
+        // one-page compile and a full build agree.
+        protected string PrimitiveLookupName(global::System.Xaml.XamlType type)
+        {
+            return ProjectInfo.IsHotReloadBuild && type.UnderlyingType != null ? type.UnderlyingType.FullName : type.ToString();
+        }
+
         public override string ToStringWithCulture(ICodeGenOutput codegenOutput)
         {
             return codegenOutput.CppWinRTName();
