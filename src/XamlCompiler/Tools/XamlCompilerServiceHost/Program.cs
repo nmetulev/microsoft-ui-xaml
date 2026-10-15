@@ -200,7 +200,7 @@ internal static class Program
         if (args.Contains("--each-page"))
         {
             var totals = new List<(double Ms, string Page)>();
-            int failures = 0;
+            int failures = 0, unrequested = 0;
             foreach (string page in service.AllXamlFiles)
             {
                 XamlCompileResult p1 = service.CompilePass1(new[] { page });
@@ -209,11 +209,24 @@ internal static class Program
                 {
                     failures++;
                 }
+
+                // A one-page compile returns (and writes) only that page's files, plus XamlTypeInfo when regenerated.
+                string prefix = Path.GetFileNameWithoutExtension(page) + ".";
+                foreach (string file in p1.GeneratedText.Keys.Concat(p2.GeneratedText.Keys).Concat(p2.GeneratedXbf.Keys))
+                {
+                    string name = Path.GetFileName(file);
+                    if (!name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && !name.StartsWith("XamlTypeInfo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        unrequested++;
+                        failures++;
+                        Console.WriteLine($"  UNREQUESTED {Path.GetFileName(page)} returned {name}");
+                    }
+                }
                 totals.Add((p1.Elapsed.TotalMilliseconds + p2.Elapsed.TotalMilliseconds, Path.GetRelativePath(Path.GetDirectoryName(inputs.ProjectPath), page)));
             }
             totals.Sort((a, b) => a.Ms.CompareTo(b.Ms));
             double P(double q) => totals[(int)Math.Min(totals.Count - 1, Math.Round(q * (totals.Count - 1)))].Ms;
-            Console.WriteLine($"each page (pass1 + pass2), {totals.Count} pages, failures={failures}: min={totals[0].Ms:F0} p50={P(0.5):F0} p90={P(0.9):F0} p99={P(0.99):F0} max={totals[^1].Ms:F0} ms; slowest: {string.Join(", ", totals.Skip(totals.Count - 3).Select(t => $"{t.Page} {t.Ms:F0}"))}");
+            Console.WriteLine($"each page (pass1 + pass2), {totals.Count} pages, failures={failures}, files of other pages={unrequested}: min={totals[0].Ms:F0} p50={P(0.5):F0} p90={P(0.9):F0} p99={P(0.99):F0} max={totals[^1].Ms:F0} ms; slowest: {string.Join(", ", totals.Skip(totals.Count - 3).Select(t => $"{t.Page} {t.Ms:F0}"))}");
         }
 
         Console.WriteLine($"process total {processClock.Elapsed.TotalMilliseconds:F0} ms, working set {Process.GetCurrentProcess().WorkingSet64 / (1024 * 1024)} MB");
