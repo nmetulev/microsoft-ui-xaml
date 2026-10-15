@@ -2519,6 +2519,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 generatedCodeFiles = null;
             }
+            if (generatedCodeFiles != null && IsHotReloadCodeGen && !IsDesignTimeBuild)
+            {
+                KeepRetiredHotReloadMembers(classCodeInfo, generatedCodeFiles);
+            }
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_PageCodeGenEnd, classCodeInfo.BaseFileName);
 
             // We need to delete the existing Pass2 code files in Pass1 in order to get a clean intermediate compile
@@ -2574,6 +2578,25 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             WriteOutputFilesToDisk(generatedXamlFiles, classCodeInfo.TargetFolder, true);
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_WriteFilesToDiskEnd);
             return true;
+        }
+
+        // Hot reload: fields and types the generated code declared since the last build stay declared (see HotReloadRetiredMembers).
+        // A build records them; a service compile puts back the ones the markup no longer produces.
+        private void KeepRetiredHotReloadMembers(XamlClassCodeInfo classCodeInfo, List<FileNameAndContentPair> generatedCodeFiles)
+        {
+            string extension = IsPass1 ? Language.Pass1Extension : Language.Pass2Extension;
+            for (int i = 0; i < generatedCodeFiles.Count; i++)
+            {
+                FileNameAndContentPair file = generatedCodeFiles[i];
+                bool isThisPass = file.FileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase) &&
+                    (IsPass1 || !file.FileName.EndsWith(Language.Pass1Extension, StringComparison.OrdinalIgnoreCase));
+                if (isThisPass && !String.IsNullOrEmpty(file.Contents))
+                {
+                    string contents = HotReloadRetiredMembers.Apply(
+                        HotReloadStateFolder, classCodeInfo.ClassName.FullName, extension, file.Contents, restoreRetiredMembers: IsServiceCompile);
+                    generatedCodeFiles[i] = new FileNameAndContentPair(file.FileName, contents);
+                }
+            }
         }
 
         private void CreateDirectoryIfNecessary(DirectoryInfo directoryInfo)

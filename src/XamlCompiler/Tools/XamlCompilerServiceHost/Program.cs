@@ -29,6 +29,11 @@ using Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop;
 //       Creates a warm service, then recompiles the given pages N times (pass 1 + pass 2) and
 //       prints per-phase timings.
 //
+//   tombstones <generated dir> <out dir>
+//       Hot reload tombstone self-test on generated C# (.g.cs, .i.g.cs): for every file, the inventory of fields and
+//       nested types must be a no-op on the file itself; then every inventoried member is removed and restored
+//       as a tombstone, and the result is written to <out dir> (same layout) to compile with 'emit --replace'.
+//
 //   emit <rsp> <projectDir> <out.dll> [--replace <from>=<to>]... [--no-generators]
 //       Builds the project's intermediate assembly with Roslyn in-process from the csc response
 //       file the build used, and reports parse, generator, full-emit and metadata-only-emit times.
@@ -51,6 +56,7 @@ internal static class Program
             case "bench": return Bench(args.Skip(1).ToArray());
             case "emit": return Emit(args.Skip(1).ToArray());
             case "edit": return EditScenario(args.Skip(1).ToArray());
+            case "tombstones": return TombstoneSelfTest(args[1], args[2]);
             default:
                 Console.WriteLine($"unknown command {args[0]}");
                 return 1;
@@ -567,6 +573,44 @@ internal static class Program
         return 0;
     }
 
+    private static int TombstoneSelfTest(string generatedDir, string outDir)
+    {
+        Type members = typeof(XamlCompilerService).Assembly.GetType("Microsoft.UI.Xaml.Markup.Compiler.HotReloadRetiredMembers", throwOnError: true);
+        var flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+        var createInventory = members.GetMethod("CreateInventory", flags);
+        var restore = members.GetMethod("Restore", flags);
+        var removeKept = members.GetMethod("RemoveKeptMembers", flags);
+        static IEnumerable<string> Keys(object inventory) =>
+            ((System.Collections.IEnumerable)inventory).Cast<object>().Select(e => (string)e.GetType().GetProperty("Key").GetValue(e));
+
+        int files = 0, entries = 0, restored = 0, failures = 0;
+        Stopwatch w = Stopwatch.StartNew();
+        foreach (string file in Directory.EnumerateFiles(generatedDir, "*.cs", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) && !f.EndsWith("XamlTypeInfo.g.cs", StringComparison.OrdinalIgnoreCase)))
+        {
+            string code = File.ReadAllText(file);
+            object inventory = createInventory.Invoke(null, new object[] { code });
+            List<string> keys = Keys(inventory).ToList();
+            string unchanged = (string)restore.Invoke(null, new object[] { code, inventory });
+            string stripped = (string)removeKept.Invoke(null, new object[] { code });
+            string tombstoned = (string)restore.Invoke(null, new object[] { stripped, inventory });
+            List<string> keysAfter = Keys(createInventory.Invoke(null, new object[] { tombstoned })).ToList();
+            bool ok = unchanged == code && keys.SequenceEqual(keysAfter) && (keys.Count == 0 || tombstoned != stripped);
+            if (!ok)
+            {
+                failures++;
+                Console.WriteLine($"  FAIL {Path.GetRelativePath(generatedDir, file)}: no-op={unchanged == code}, keys {keys.Count} -> {keysAfter.Count}");
+            }
+            files++;
+            entries += keys.Count;
+            restored += tombstoned != stripped ? 1 : 0;
+            string target = Path.Combine(outDir, Path.GetRelativePath(generatedDir, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target));
+            File.WriteAllText(target, tombstoned, new System.Text.UTF8Encoding(true));
+        }
+        Console.WriteLine($"tombstone self-test: {files} files, {entries} inventoried members, {restored} files rebuilt from tombstones, {failures} failures, {w.ElapsedMilliseconds} ms");
+        return failures == 0 ? 0 : 1;
+    }
     // Copies what the compiler wrote to disk for this compile (exact bytes, as a build would leave them).
     private static void Save(XamlCompileResult r, string dir, string serviceOutput)
     {
