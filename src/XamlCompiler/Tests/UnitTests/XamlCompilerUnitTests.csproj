@@ -58,6 +58,7 @@
     <Compile Include="CodeGeneratorProjectContext.cs" />
     <Compile Include="CodeGeneratorTests.cs" />
     <Compile Include="CppWinRTHotReloadCodegenTests.cs" />
+    <Compile Include="CSharpHotReloadCodegenTests.cs" />
     <Compile Include="FunctionBindingCodegenTests.cs" />
     <Compile Include="FixMastersTests.cs" />
     <Compile Include="..\..\Tools\FixMasters\FixMasters.cs">

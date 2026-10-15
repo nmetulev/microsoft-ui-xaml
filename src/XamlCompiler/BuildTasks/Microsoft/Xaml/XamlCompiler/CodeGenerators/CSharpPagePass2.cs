@@ -919,6 +919,8 @@ this.Write(this.ToStringHelper.ToStringWithCulture(bindUniverse.BindingsClassNam
 
 this.Write("Tracking bindingsTracking;\r\n");
 
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadEnsureBindingsTracking(bindUniverse)));
+
              }
 this.Write("\r\n            public ");
 
@@ -1164,7 +1166,11 @@ this.Write(";\r\n");
                      } 
                  }
                  if (element.TwoWayBindAssignments.Any()) { 
-this.Write("                        this.bindingsTracking.RegisterTwoWayListener_");
+this.Write("                        ");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(BindingsTrackingAccess));
+
+this.Write(".RegisterTwoWayListener_");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(element.ConnectionId));
 
@@ -1575,7 +1581,11 @@ this.Write(", 1 << phase);\r\n            }\r\n\r\n            public void Recyc
 
              if (bindUniverse.NeedsBindingsTracking)
              {
-this.Write("                this.bindingsTracking.ReleaseAllListeners();\r\n");
+this.Write("                this.bindingsTracking");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadNullConditional));
+
+this.Write(".ReleaseAllListeners();\r\n");
 
              }
  foreach(KeyValuePair<int, List<PhaseAssignment>> kvp in bindUniverse.PhaseAssignments.Where(kvp => kvp.Key != 0).OrderBy(kvp => kvp.Key)) 
@@ -1783,7 +1793,11 @@ this.Write("\r\n            public bool SetDataRoot(global::System.Object newDat
 
              if (bindUniverse.NeedsBindingsTracking)
              {
-this.Write("                this.bindingsTracking.ReleaseAllListeners();\r\n");
+this.Write("                this.bindingsTracking");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadNullConditional));
+
+this.Write(".ReleaseAllListeners();\r\n");
 
              }
 this.Write("                if (newDataRoot != null)\r\n                {\r\n                    " +
@@ -1930,7 +1944,11 @@ this.Write(" bindings = this;\r\n");
                  }
                  if (bindStep.RequiresChildNotification && (bindStep is PropertyStep || bindStep is CastStep || bindStep is RootStep || bindStep is RootNamedElementStep || bindStep is ArrayIndexStep || bindStep is MapIndexStep))
                  {
-this.Write("                this.bindingsTracking.UpdateChildListeners_");
+this.Write("                ");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(BindingsTrackingAccess));
+
+this.Write(".UpdateChildListeners_");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(bindStep.CodeName));
 
