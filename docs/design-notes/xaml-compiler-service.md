@@ -1,6 +1,8 @@
 # XAML compiler as a service
 
-Status: spike (branch `nmetulev-xaml-compiler-service`), for review by the WinUI team.
+Status: spike (branch `nmetulev-xaml-compiler-service`), for review by the WinUI team. Part 2 adds
+[hot reload code generation](#hot-reload-code-generation): what the compiler generates in hot reload
+(Debug) builds so that .NET hot reload can apply every recompile.
 
 ## Table of Contents
 
@@ -12,6 +14,8 @@ Status: spike (branch `nmetulev-xaml-compiler-service`), for review by the WinUI
 - [Correctness](#correctness)
 - [Measurements](#measurements)
 - [Compiler changes](#compiler-changes)
+- [Hot reload code generation](#hot-reload-code-generation)
+- [Roslyn issues to file](#roslyn-issues-to-file)
 - [Open questions and risks](#open-questions-and-risks)
 
 ## Why
@@ -58,7 +62,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public IReadOnlyList<string> AllXamlFiles { get; }
 
-        // .g.i.cs (C#) or .g.h (C++) for the given pages. Doesn't need the project's assembly.
+        // A page the build didn't compile (a new file), as a Page item. Compile calls add any .xaml file
+        // they're given that isn't in the project yet, so a host normally doesn't need it.
+        public bool AddXamlPage(string xamlFile);
+
+        // A deleted page. Its generated files are left alone.
+        public bool RemoveXamlPage(string xamlFile);
+
+        // .g.i.cs (C#; .i.g.cs in hot reload builds) or .g.h (C++) for the given pages.
+        // Doesn't need the project's assembly.
         public XamlCompileResult CompilePass1(IEnumerable<string> xamlFiles);
 
         // .g.cs / .g.hpp, the edited XAML and the .xbf for the given pages.
@@ -80,8 +92,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public bool Success { get; }
         public TimeSpan Elapsed { get; }
 
-        // Generated source and edited XAML by full path. The file on disk is this text, UTF-8 with a
-        // BOM, plus a final newline.
+        // Generated source and edited XAML by full path: exactly the text of the file on disk (UTF-8
+        // with a BOM).
         public IDictionary<string, string> GeneratedText { get; }
 
         // .xbf bytes for the requested pages, by full path.
@@ -126,7 +138,7 @@ Before shipping we would:
 
 C# (with .NET hot reload applying the generated code):
 
-1. `CompilePass1([page])` gives the new `.g.i.cs`.
+1. `CompilePass1([page])` gives the new `.g.i.cs` (`.i.g.cs` in hot reload builds).
 2. If any user-written C# changed since the last image, emit the app's compilation metadata-only
    (`EmitOptions(metadataOnly: true, includePrivateMembers: true)`) and pass the bytes. Otherwise reuse
    the previous image: in our tests the changes pass 1 makes to `.g.i.cs` (new fields) didn't affect
@@ -163,10 +175,11 @@ running a normal two-pass compile on the same inputs (what `dotnet build` runs).
 | `XamlCompiler.exe --serve` on Gallery | 777/777 identical |
 | This branch's compiler vs. the unmodified compiler, normal build | Gallery 777/777, C++ 27/27 identical |
 
-One thing is not identical: regenerating XamlTypeInfo from a single-page pass 2 with
+One thing is not identical in normal builds: regenerating XamlTypeInfo from a single-page pass 2 with
 `regenerateTypeInfo: true` changes the order of members in `XamlTypeInfo.g.cs`. That order follows
 the order in which System.Xaml first looked members up, which depends on every page being harvested.
-That's why the service uses a full pass 2 when type info is stale.
+That's why the service uses a full pass 2 when type info is stale. Hot reload builds sort the tables
+instead (see [XamlTypeInfo](#4-xamltypeinfo)), and there the service's XamlTypeInfo is identical.
 
 ## Measurements
 
@@ -213,7 +226,10 @@ Service support (no effect on builds):
 - In the service, assembly files are read completely when loaded and not kept open, so a build can
   overwrite the project's intermediate assembly and its references while the service is alive.
   A build still reads them lazily, as before.
-- `Tools/XamlCompilerServiceHost`: benchmarks, the Roslyn emit and the edit scenarios used above.
+- `Tools/XamlCompilerServiceHost`: benchmarks, the Roslyn emit and the edit scenarios used above,
+  `--hot-reload` (read inputs as a hot reload build), and the `tombstones` self-test.
+- `Tools/XamlHotReloadEncHarness`: replays a journey through the service and .NET hot reload (see
+  [Evidence](#evidence)).
 
 Fixes that matter for builds too:
 
@@ -230,12 +246,221 @@ Fixes that matter for builds too:
   .NET Framework compiler does.
 - References are no longer re-read from disk when they're loaded a second time in the same universe.
 
+## Hot reload code generation
+
+The real compiler's output can be applied live with .NET hot reload (spike S1/S2) if the generated C# changes only
+in ways edit and continue supports. In hot reload builds the compiler now generates code shaped for that. A normal
+(Release) build is unchanged.
+
+### The gate
+
+`EnableXamlHotReload` (a CompileXaml input, from the targets) turns it on. The targets default it to `true` for
+Debug builds (C#: `Optimize != true`; C++: `UseDebugLibraries`). `EnableHotReloadStableConnectionIds` now defaults
+to `$(EnableXamlHotReload)`. The service passes the build's value through, so a hot reload Debug build and every
+service compile generate the same shape.
+
+- Stable connection IDs (Prototype A) apply to every language: C++ also stops renumbering when an element is inserted.
+- The code generation changes below are C# only (`IsHotReloadCodeGen`). For C++, the one change is a deterministic
+  lookup in the C++/WinRT `static_assert` list (see [Other changes](#other-changes)).
+
+### 1. Stable, append-only connection IDs and tombstones
+
+**Where the state lives.** The connection ID ledger and the member inventories are in the build's output folder
+(`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
+compiles that follow it continue one history. Clean deletes the folder.
+
+- **Deterministic transient IDs.** An element without a stable key (no `x:Name`, `x:Uid` or `x:Key`, and not unique
+  by structure) used to get a new ID on every compile, so recompiling the same markup changed the output.
+  - Each such element now has a fingerprint: scope, type and collision key.
+  - The k-th element with a given fingerprint reuses the k-th ID it had last time; unused IDs are retired.
+  - A rebuild of unchanged markup is now a fixed point.
+- **Service compiles.** They regenerate only the requested pages. Builds still regenerate every page, so that every
+  page's ledger is republished. Ledger files whose bytes didn't change aren't rewritten.
+
+**Tombstones.** .NET hot reload can't delete a field or a type (ENC0033). After codegen, a declaration-level scanner
+of the generated C# records the fields and nested types of each class, per generated file, in
+`<Class>.<hash>.<ext>.members.json`. On a service compile, any recorded member the new code no longer declares is put
+back before the closing brace of its container:
+
+- A field keeps its declaration without its initializer (constants stay as they are).
+- A type keeps its header, fields and nested types. Its method, constructor and accessor bodies become
+  `{ throw null; }`, and expression bodies become `=> throw null;`.
+- The block is wrapped in `#pragma warning disable` / `restore`, with a comment.
+- A live member with the same name always wins.
+- A build records the inventory but puts nothing back: it is the new baseline, and the app restarts from it.
+
+The order of the restored members is deterministic (sorted by key).
+
+**Template Bindings classes.** A template's Bindings classes are named with a hash of their data type
+(`Page_obj20_Bindings_1a2b3c4d`), so an `x:DataType` change adds new classes instead of changing field types
+(ENC0009). The old classes become tombstones.
+
+### 2. No redundant default initializers
+
+`initialized`, `removedDataContextHandler`, the static `isobjN...Disabled` flags, `cache_X` and `tokenDPC_X` are
+declared without `= false`, `= null` or `= 0`. A static initializer gives the class a static constructor, and
+Roslyn 5.9 throws when an update changes the static constructor of a type that an earlier update added (see
+[Roslyn issues](#roslyn-issues-to-file)). Hot reload output now has no static initializers and no static
+constructors.
+
+### 3. `.g.i.cs` is `.i.g.cs`
+
+Roslyn's edit and continue ignores documents named `*.g.i.cs` (`IsWpfDesignTimeOnlyDocument`), and that's where
+WinUI puts the `x:Name` fields, `InitializeComponent` and the `Bindings` field. Changing
+`<TextBlock x:Name="Later">` to `<TextBox x:Name="Later">` was silently "applied" while the field kept its old type.
+
+Hot reload builds name the C# pass 1 file `<Page>.i.g.cs`.
+
+- It still ends in `.g.cs`, so analyzers and the IDE treat it as generated (it also carries the `<auto-generated>`
+  header).
+- MSBuild takes the file names from the task's outputs, so nothing in the targets changes.
+- Design-time builds and IntelliSense see the same file.
+
+Options considered:
+
+| Option | Verdict |
+|---|---|
+| (a) Rename the file in the compiler (chosen) | Small, and the build and the service agree. |
+| (b) The host gives Roslyn the same text under another document name | Breaks the PDB's document paths and checksums for the running baseline. |
+| (c) A Roslyn change, so that only WPF projects get the `.g.i.cs` rule | Right long term. Filed as an issue; (a) doesn't depend on it. |
+
+### 4. XamlTypeInfo
+
+- **Reset hook.** `[assembly: MetadataUpdateHandler(typeof(XamlTypeInfoProvider))]`. Its `ClearCache` bumps a
+  static generation counter. On its next lookup each provider clears its caches and type tables, so a type added
+  by an update is found.
+- **Canonical order.** The type and member tables are sorted by name (ordinal) before code generation. A service
+  compile that regenerates XamlTypeInfo (`regenerateTypeInfo: true`) is then byte-identical to a build, whatever
+  the warm schema context looked up before.
+- **Stable method names.** `Activate_`, `StaticInitializer_`, `VectorAdd_`, `MapAdd_`, `get_` and `set_` use a hash
+  of the type or member name instead of the table index. Inserting a type no longer renames, and therefore deletes,
+  every method after it, and delegates cached by WinUI keep pointing at live methods.
+- **Per save, XamlTypeInfo is not regenerated** (`regenerateTypeInfo: false`) unless `XamlTypeInfoMayBeStale` says a
+  page uses a type or member that isn't in it. A removal leaves a harmless superset until the next regeneration. A
+  replay cache of per-page type info would make the regeneration itself cheap, but isn't needed for correctness.
+
+### 5. Re-running InitializeComponent
+
+The agent resets `_contentLoaded` and calls `InitializeComponent` again on the live object. The generated code now
+does the rest:
+
+- **Before `LoadComponent`:** the previous `Bindings` stop (`StopTracking()`).
+- **After `LoadComponent`:** if the root (or a Window's content) is already loaded, it calls `Bindings.Update()`,
+  because `Loading` (or `Activated`) won't fire again.
+- **In a root Bindings class**, `Loading` and `Activated` return early unless the object is still the owner's
+  current `Bindings`. Otherwise a replaced Bindings object, still subscribed to the root, starts again on the next
+  event: a Window raises `Activated` often, and `StopTracking` resets `initialized`.
+- **`StopTracking` is null-safe** (`bindingsTracking?.`).
+
+The host must still call the old `StopTracking` before it applies the update. After the delta, the old object's
+methods are the new code running against old fields.
+
+### Other changes
+
+- C++/WinRT: `static_assert`s for projected primitives were decided with `XamlType.ToString()`. That string includes
+  the XAML namespace once something has initialized it, and whether something has depends on which other pages the
+  same compile looked at. A full build could then emit `static_assert(is_type_complete_v<::winrt::hstring>)` that a
+  one-page compile didn't. Hot reload builds look up the CLR name. Normal builds keep the old behavior; it is
+  probably worth fixing for them too, since an incremental build can differ from a full one the same way.
+- `XamlCompileResult.GeneratedText` is now exactly the file's text. The file service writes with `WriteLine`, so
+  the old value lacked the final line break, and a host that gave it to Roslyn compiled slightly different text
+  than the build did.
+- `XamlCompilerService.AddXamlPage` and `RemoveXamlPage` (new and deleted pages).
+
+### Evidence
+
+`Tools/XamlHotReloadEncHarness` replays a winapp journey through the service and the SDK's edit-and-continue engine
+(dotnet watch's `HotReloadService`, Roslyn 5.9 from SDK 10.0.401).
+
+- **What a save is:** apply the edit, run pass 1, emit the app metadata-only, run pass 2, update the Roslyn
+  solution, then `GetUpdatesAsync`.
+- **Builds:** `XamlCompiler.exe` pass 1, an intermediate compile, pass 2, then a full C# compile that becomes the
+  baseline. A build happens at the start and after every rude edit or exception, where the app would restart.
+- **`--verify-build`:** after every XAML save it builds the same sources and ledger state into a scratch folder and
+  compares every generated file.
+
+TodoBench, the S1/S2 journey (24 saves) plus one extra (`TextBlock` to `TextBox` with the same `x:Name`):
+
+| Mode | Applied live | Rude edits | Roslyn exceptions | App restarts |
+|---|---|---|---|---|
+| off (today's Debug build) | 12 of 25 | 6 (ENC0020 renames, ENC0033, ENC0009) | 5 (NRE) | 12 |
+| stable IDs only (the S1/S2 spike) | 15 of 25 (the extra step "applies" wrongly) | 2 (s12 ENC0033, s17 ENC0009) | 6 (NRE) | 9 |
+| hot reload code generation | 22 of 25 | 1 (the extra step: ENC0009, correct) | 0 | 2 (initial, and after that step) |
+
+The three that don't apply in hot reload mode are expected:
+
+- s03a: a `Click` handler that doesn't exist yet (CS1061).
+- s18a: the new UserControl's `x:Bind` to a property that its code-behind (s18b) adds (WMC1110). The page is
+  compiled again when the code arrives, and s18b applies.
+- The extra step, which must restart.
+
+With `--verify-build`, every XAML save was identical to a build of the same state:
+
+- s01 to s11: 13 of 13 files identical.
+- s12 to x1: two files (the page's `.g.cs` and `.i.g.cs`) differ only by the tombstone blocks; everything else is
+  identical, including XBF, edited XAML and XamlTypeInfo.
+
+WinUI Gallery, hot reload mode:
+
+- **Fixed point:** build, rebuild, then every page recompiled through the service into the same folder. 1522 of 1522
+  files identical (generated code, XBF, ledgers, manifests, member inventories), with
+  `--typeinfo skip` and with `--typeinfo all`.
+- **Tombstone self-test** (`XamlCompilerServiceHost tombstones`): 388 generated files, 5309 recorded members. Each
+  file is stripped of every field and nested type and restored from tombstones. The app compiles, and the
+  metadata-only image is the same size (928,768 bytes).
+- **C++ (Simple):** the fixed point is 38 of 38 identical.
+
+Normal builds (flags off) are unchanged: Gallery 777 of 777 and C++ 27 of 27 identical to the unmodified compiler's
+output.
+
+Cost: warm, one Gallery page (Button, ComboBox, ScrollViewer; image; type info skipped), measured back to back on a
+loaded machine:
+
+| Mode | Pass 1 p50 | Pass 2 p50 |
+|---|---|---|
+| Off | 27 to 37 ms | 38 to 52 ms |
+| Hot reload | 27 to 29 ms | 47 to 52 ms |
+
+The ledger, manifest and inventory work is 4 to 17 ms of that.
+
+## Roslyn issues to file
+
+1. **NullReferenceException in `DefinitionMap.GetPreviousMethodHandle`** (Roslyn 5.9.0, SDK 10.0.401, through
+   `HotReloadService.GetUpdatesAsync`). Plain C#, verified with the harness:
+   - Save 1 adds `public static class Helper { private static bool s_a = false; public static bool A => s_a; }`.
+     It applies.
+   - Save 2 adds `private static bool s_b = false;` to `Helper`, and `GetUpdatesAsync` throws:
+
+     ```
+     NullReferenceException at Microsoft.CodeAnalysis.Emit.DefinitionMap.GetPreviousMethodHandle(IMethodSymbolInternal oldProperty, IMethodSymbolInternal& peMethod)
+     ```
+
+   - Control: if save 1 declares `s_a` without an initializer (no static constructor), the later saves apply,
+     including one that adds `s_c = false`.
+
+   The trigger is an update to the synthesized static constructor of a type that an earlier update added.
+2. **Edit and continue ignores `*.g.i.cs` in every project type.** `IsWpfDesignTimeOnlyDocument` (in
+   `EditAndContinue/Utilities/Extensions.cs`) excludes it, so a change to a field's type in that file (WinUI's
+   `x:Name` fields) applies with no rude edit, and the field keeps its old type at run time. Ask: limit the rule to
+   WPF projects, or report changes in such documents as rude edits. WinUI hot reload builds no longer depend on it.
+
 ## Open questions and risks
 
-- XamlTypeInfo member order depends on lookup history. If the team agrees to a canonical order
-  (for example declaration order), XamlTypeInfo could be regenerated from cached per-page type info
-  instead of a 2 s full pass 2. That changes the order in every project's `XamlTypeInfo.g.cs`
-  once.
+- XamlTypeInfo member order depends on lookup history in normal builds. Hot reload builds now sort the tables
+  (canonical, ordinal). Doing the same for every build would change every project's `XamlTypeInfo.g.cs` once.
+- Hot reload code generation:
+  - Tombstones exist only between builds; a build is a new baseline. A tombstone whose field type is a user type
+    that was since deleted or renamed fails to compile. That edit is a rude edit in user code anyway, but the error
+    shows up in generated code.
+  - Elements without a stable key get transient IDs. They are deterministic for unchanged markup, but moving such
+    an element can still renumber it, which retires the old field (a tombstone, not a rude edit).
+  - WinUI's native metadata cache keeps the `IXamlType` objects it already resolved. The provider reset makes new
+    types and members resolvable; a changed member on a type WinUI has already cached (for example a new dependency
+    property on a user control that's on screen) may still need a restart. Not tested with a running app.
+  - The re-init changes (`StopTracking`, `Update`, the guard against retired root Bindings) were checked for the
+    shape of the code and for edit-and-continue acceptance, not in a running app.
+  - The C++/WinRT `static_assert` determinism fix is gated on hot reload. Normal incremental C++ builds can still
+    differ from full builds in that list.
 - The stale check detects added types and members, not removed ones. A type that is no longer used
   stays in XamlTypeInfo until the next full compile. That's harmless at run time but isn't
   byte-identical to a build.

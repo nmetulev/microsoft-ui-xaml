@@ -46,6 +46,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // C# hot reload builds: shape the generated code so .NET hot reload can apply each recompile.
         public bool IsHotReloadCodeGen { get; set; }
 
+        // Any language: EnableXamlHotReload. A hot reload build and a compiler service compile of one page must agree.
+        public bool IsHotReloadBuild { get; set; }
+
         // Properties only relevent for C++
         public Dictionary<String, String> ClassToHeaderFileMap { get; set; }
 
