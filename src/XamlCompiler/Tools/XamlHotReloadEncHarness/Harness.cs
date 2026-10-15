@@ -41,6 +41,7 @@ internal sealed class Harness
     private AdhocWorkspace? _workspace;
     private ProjectId? _projectId;
     private Solution? _solution;
+    private Solution? _committedSolution;
     private EncSession? _enc;
     private XamlCompilerService? _service;
     private int _baselines;
@@ -208,6 +209,24 @@ internal sealed class Harness
             result.EncMs = encClock.Elapsed.TotalMilliseconds;
             result.Outcome = "exception";
             result.Details = $"{inner.GetType().Name}: {inner.Message} at {inner.StackTrace?.Split('\n').FirstOrDefault()?.Trim()}";
+            if (Environment.GetEnvironmentVariable("XHR_HARNESS_STACKS") == "1")
+            {
+                Console.WriteLine(inner.ToString());
+                if (_committedSolution != null)
+                {
+                    foreach (DocumentId changed in _solution!.GetChanges(_committedSolution).GetProjectChanges().SelectMany(p => p.GetChangedDocuments()))
+                    {
+                        string name = Path.GetFileName(_solution.GetDocument(changed)!.FilePath!);
+                        File.WriteAllText(Path.Combine(_outDir, "exception-old-" + name), (await _committedSolution.GetDocument(changed)!.GetTextAsync()).ToString());
+                        File.WriteAllText(Path.Combine(_outDir, "exception-new-" + name), (await _solution.GetDocument(changed)!.GetTextAsync()).ToString());
+                    }
+                }
+            }
+            string deleted = await DeletedMembersAsync();
+            if (deleted.Length > 0)
+            {
+                result.Details += " (members the update deletes: " + deleted + ")";
+            }
             await BuildAndStartAsync("rebuild after exception");
             return result;
         }
@@ -228,6 +247,7 @@ internal sealed class Harness
         else if (enc.Deltas.Count > 0)
         {
             _enc.Commit();
+            _committedSolution = _solution;
             result.Outcome = "applied";
             result.Details = $"{enc.Deltas.Count} delta(s): metadata {enc.Deltas.Sum(d => d.Metadata)} B, IL {enc.Deltas.Sum(d => d.IL)} B, {enc.Deltas.Sum(d => d.UpdatedTypes)} updated type(s)";
         }
@@ -385,6 +405,7 @@ internal sealed class Harness
             }
         }
         _enc = new EncSession(_solution!, _projectId!, RuntimeCapabilities);
+        _committedSolution = _solution;
         await _enc.StartAsync(_solution!);
 
         // The compiler service, warmed with a full compile, which must reproduce the build's files exactly.
@@ -586,6 +607,60 @@ internal sealed class Harness
         _solution = id != null
             ? _solution.WithDocumentText(id, source)
             : _solution.AddDocument(DocumentId.CreateNewId(_projectId!), Path.GetFileName(path), source, filePath: path);
+    }
+
+    // Diagnostics for an update that throws: the members of the last applied version's source types that the new version
+    // no longer declares (what edit and continue has to delete).
+    private async Task<string> DeletedMembersAsync()
+    {
+        if (_committedSolution == null)
+        {
+            return string.Empty;
+        }
+        Compilation before = (await _committedSolution.GetProject(_projectId!)!.GetCompilationAsync())!;
+        Compilation after = (await _solution!.GetProject(_projectId!)!.GetCompilationAsync())!;
+        var deleted = new List<string>();
+        foreach (INamedTypeSymbol type in SourceTypes(before.Assembly.GlobalNamespace))
+        {
+            INamedTypeSymbol? now = after.GetTypeByMetadataName(MetadataName(type));
+            if (now == null)
+            {
+                deleted.Add(type.ToDisplayString());
+                continue;
+            }
+            var current = new HashSet<string>(now.GetMembers().Select(m => m.ToDisplayString()));
+            deleted.AddRange(type.GetMembers().Where(m => !current.Contains(m.ToDisplayString())).Select(m => m.ToDisplayString()));
+        }
+        return string.Join(", ", deleted.Take(12)) + (deleted.Count > 12 ? $" (+{deleted.Count - 12} more)" : "");
+    }
+
+    private static IEnumerable<INamedTypeSymbol> SourceTypes(INamespaceOrTypeSymbol container)
+    {
+        foreach (ISymbol member in container.GetMembers())
+        {
+            if (member is INamespaceSymbol ns)
+            {
+                foreach (INamedTypeSymbol t in SourceTypes(ns))
+                {
+                    yield return t;
+                }
+            }
+            else if (member is INamedTypeSymbol type && type.Locations.Any(l => l.IsInSource))
+            {
+                yield return type;
+                foreach (INamedTypeSymbol nested in SourceTypes(type))
+                {
+                    yield return nested;
+                }
+            }
+        }
+    }
+
+    private static string MetadataName(INamedTypeSymbol type)
+    {
+        return type.ContainingType != null
+            ? MetadataName(type.ContainingType) + "+" + type.MetadataName
+            : (type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString() + ".") + type.MetadataName;
     }
 
     private async Task<byte[]?> EmitImageAsync(Solution solution)
