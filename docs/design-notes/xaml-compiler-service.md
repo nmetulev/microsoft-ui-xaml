@@ -268,6 +268,10 @@ to `$(EnableXamlHotReload)`. The service passes the build's value through, so a 
 service compile generate the same shape.
 
 - Stable connection IDs (Prototype A) apply to every language: C++ also stops renumbering when an element is inserted.
+- Hot reload builds always leave the pass 2 compiler inputs (`input.json`, next to the generated files: C#
+  `obj\...\input.json`, C++ `Generated Files\input.json`) for a host to start the service from. `dotnet build` (the
+  executable compiler) always wrote them; Visual Studio's MSBuild (the in-process compiler) now writes them too when
+  `EnableXamlHotReload` is true. Check: `src\XamlCompiler\Tools\CheckXamlHotReloadInputs.ps1`.
 - Sections 2 to 5 below are C# only (`IsHotReloadCodeGen`). C++/WinRT gets its own changes (`IsCppHotReloadCodeGen`,
   [section 6](#6-cwinrt)) and a deterministic lookup in its `static_assert` list (see [Other changes](#other-changes)).
 
