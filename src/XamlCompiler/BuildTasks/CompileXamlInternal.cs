@@ -1634,7 +1634,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 string outputFilename = Path.Combine(targetFolder, codeFile.FileName);
                 if (ServiceWrittenFiles != null)
                 {
-                    ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile.Contents;
+                    // Exactly the text on disk: the file service writes the contents with WriteLine.
+                    ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile.Contents + Environment.NewLine;
                 }
 
                 if (updateOnlyIfContentNew)
@@ -1685,7 +1686,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     string outputFilename = Path.Combine(OutputFolderFullpath, codeFile0.FileName);
                     if (ServiceWrittenFiles != null)
                     {
-                        ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile0.Contents;
+                        ServiceWrittenFiles[Path.GetFullPath(outputFilename)] = codeFile0.Contents + Environment.NewLine;
                     }
                     string backupFilename = outputFilename + KnownStrings.BackupSuffix;
                     if (File.Exists(backupFilename))
@@ -2350,6 +2351,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     {
                         classCodeInfo.XamlComponentResourceLocation = GetComponentResourceLocation(tif.XamlComponentResourceLocation);
                     }
+                    classCodeInfo.IsHotReloadCodeGen = IsHotReloadCodeGen;
                     if (_hotReloadConnectionIdLedgerSession != null)
                     {
                         classCodeInfo.EnableHotReloadConnectionIds(_hotReloadConnectionIdLedgerSession);

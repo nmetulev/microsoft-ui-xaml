@@ -313,6 +313,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get { return ++lastConnectionId; }
         }
 
+        // Hot reload code generation (EnableXamlHotReload, C#): see BindUniverse.BindingsClassName.
+        internal bool IsHotReloadCodeGen { get; set; }
+
         public void EnableHotReloadConnectionIds(HotReloadConnectionIdLedgerSession session)
         {
             if (session == null)

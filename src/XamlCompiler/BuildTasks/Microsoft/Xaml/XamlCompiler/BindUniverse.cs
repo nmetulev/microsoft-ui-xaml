@@ -12,6 +12,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     {
         private IEnumerable<string> distinctConvertersUsed;
         private readonly string parentClassShortName;
+        private readonly bool hotReloadCodeGen;
         public IList<BindUniverse> Children = new List<BindUniverse>();
         public BindUniverse Parent = null;
 
@@ -53,8 +54,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return ElementRootStep;
         }
 
-        internal BindUniverse(ConnectionIdElement rootElement, XamlType dataRootType, bool isFileRoot, string classShortName)
+        internal BindUniverse(ConnectionIdElement rootElement, XamlType dataRootType, bool isFileRoot, string classShortName, bool hotReloadCodeGen = false)
         {
+            this.hotReloadCodeGen = hotReloadCodeGen;
             RootElement = rootElement;
             LoadRootElement = rootElement;
             IsFileRoot = isFileRoot;
@@ -237,7 +239,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get
             {
                 Debug.Assert(!string.IsNullOrEmpty(parentClassShortName), "BindingsClassName should never be called before Parse");
-                return string.Format("{0}_obj{1}_Bindings", parentClassShortName, RootElement.ConnectionId);
+                return string.Format("{0}_obj{1}_Bindings", parentClassShortName, RootElement.ConnectionId) + HotReloadDataRootSuffix;
             }
         }
 
@@ -246,7 +248,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get
             {
                 Debug.Assert(!string.IsNullOrEmpty(parentClassShortName), "BindingsTrackingClassName should never be called before Parse");
-                return string.Format("{0}_obj{1}_BindingsTracking", parentClassShortName, RootElement.ConnectionId);
+                return string.Format("{0}_obj{1}_BindingsTracking", parentClassShortName, RootElement.ConnectionId) + HotReloadDataRootSuffix;
+            }
+        }
+
+        // Hot reload builds: a template's Bindings classes are named after their data type too. Their fields and methods are
+        // typed by it, so an x:DataType change would change field types (a rude edit for .NET hot reload); with the type in
+        // the name it creates new classes instead, and the old ones are kept as tombstones.
+        private string HotReloadDataRootSuffix
+        {
+            get
+            {
+                if (!hotReloadCodeGen || IsFileRoot || DataRootType?.UnderlyingType == null)
+                {
+                    return string.Empty;
+                }
+                return "_" + HotReloadConnectionIdText.ComputeHash(DataRootType.UnderlyingType.FullName).Substring(0, 8);
             }
         }
 
