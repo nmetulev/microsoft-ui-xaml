@@ -286,6 +286,12 @@ out `EnableXamlHotReload` used to get, for example, C++ `static_assert`s and `.g
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.
 
+The files are named by a 12-hex hash of the class name (`<hash>.connids.json`, `<hash>.hotreload.json`,
+`<hash>.i.g.cs.members.json`, at most 40 characters), and atomic writes go through `~<n>.tmp` in the same folder, so a
+temporary path is never longer than the file's own. When the folder is deeper than 218 characters, the compiler
+addresses it as `\\?\<path>`: XamlCompiler.exe runs on .NET Framework, which can't open longer paths otherwise, even
+with LongPathsEnabled. A state path that still fails is reported as WMC9998 with its length, not as an internal error.
+
 - **Bound-signature keys** for unnamed elements that bind or handle events (the ones that get connection IDs): their
   namescope, type, and canonical `x:Bind` and handler text, plus their order among identical elements in the namescope.
   Inserting other elements, or wrapping or moving the element, keeps its ID; editing its binding gives it a new one.
@@ -300,11 +306,18 @@ compiles that follow it continue one history. Clean deletes the folder.
   page's ledger is republished. Ledger files whose bytes didn't change aren't rewritten.
 
 **Tombstones.** .NET hot reload can't delete a field or a type (ENC0033). After codegen, a declaration-level scanner
-of the generated C# records the fields and nested types of each class, per generated file, in
-`<Class>.<hash>.<ext>.members.json`. On a service compile, any recorded member the new code no longer declares is put
+of the generated C# records the fields, methods and nested types of each class, per generated file, in
+`<hash>.<ext>.members.json`. On a service compile, any recorded member the new code no longer declares is put
 back before the closing brace of its container:
 
 - A field keeps its declaration without its initializer (constants stay as they are).
+- A method keeps its header with an inert body (below), when no live member of the same name is left. .NET hot reload
+  can delete a method, but Roslyn can't delete one that an earlier update of the session added (issue 4): an
+  `x:Load` element added and then removed during a session took `UpdateUnloadedElement`, `CompleteUpdate`,
+  `Update_<path>` and the page's `UnloadObject` implementation with it. Not kept: constructors, operators, explicit
+  interface implementations, generic, abstract, extern and partial methods, except `UnloadObject`, whose defining
+  declaration pass 1 emits for every page. A dropped implementation leaves a partial method unimplemented, which
+  Roslyn also deletes. `InitializeXProperties` (`x:Property`) is not covered.
 - A type keeps its header, fields and nested types. Its method, constructor and accessor bodies are inert, because
   live objects created before the update can still call them: a list calls `IDataTemplateComponent.Recycle`,
   `ProcessBindings` and `Update` on the old Bindings object of every container it recycles or reuses. Void members,
@@ -482,13 +495,14 @@ With `--verify-build`, every XAML save was identical to a build of the same stat
 
 WinUI Gallery, hot reload mode:
 
-- **Fixed point:** build, rebuild, then every page recompiled through the service into the same folder. 1522 of 1522
+- **Fixed point:** build, rebuild, then every page recompiled through the service into the same folder. 1523 of 1523
   files identical (generated code, XBF, ledgers, manifests, member inventories), with
   `--typeinfo skip` and with `--typeinfo all`.
-- **Tombstone self-test** (`XamlCompilerServiceHost tombstones`): 388 generated files, 5309 recorded members. Each
-  file is stripped of every field and nested type and restored from tombstones. The app compiles, and the
-  metadata-only image is the same size (928,768 bytes). The tombstones also compile on their own (no CS0161, CS0177,
-  CS0127, CS0126 or CS1622) and contain no `throw`: 291 files rebuilt from tombstones, 0 failures.
+- **Tombstone self-test** (`XamlCompilerServiceHost tombstones`): 388 generated files, 10716 recorded members. Each
+  file is stripped of every field, nested type and keepable method and restored from tombstones: 370 files rebuilt,
+  0 failures. The tombstones compile on their own (no CS0161, CS0177, CS0127, CS0126 or CS1622) and contain no
+  `throw`. Gallery compiled with all 373 rebuilt generated files in place of the build's (csc with the build's
+  arguments): 0 errors.
 - **C++ (Simple):** the fixed point is 38 of 38 identical.
 
 Normal builds (flags off) are unchanged: Gallery 777 of 777 and C++ 27 of 27 identical to the unmodified compiler's
@@ -572,6 +586,13 @@ on a loaded machine), against 10 to 13.5 s for a cold service. A host still need
    code: don't hand Roslyn a compile whose generated files changed only in `#pragma checksum` lines (hold them back
    and send them with the next real change, so one `.xaml`'s checksums stay consistent, CS1697). User edits that
    change only comments or whitespace still hit it.
+4. **Deleting a method that an earlier update added throws the same NullReferenceException** (from
+   `DeltaMetadataWriter.CreateDeletedMemberDefs` → `getDeletedMemberDefs`). Harness repro (the pipeline's
+   parity-xbind-divergences journey): save 1 adds `<Border x:Load="{x:Bind Vm.Flag, Mode=OneWay}">` (applies; the
+   update adds `UpdateUnloadedElement`, `CompleteUpdate`, `Update_Vm_Flag` and the `UnloadObject` implementation),
+   save 2 removes it: NRE. Removing it after a build instead of an update applies. Generated code avoids it by keeping
+   removed methods as inert tombstones (§1); user code that deletes a method it added in the same session still
+   hits it.
 
 ## Open questions and risks
 
@@ -580,7 +601,9 @@ on a loaded machine), against 10 to 13.5 s for a cold service. A host still need
 - Hot reload code generation:
   - Tombstones exist only between builds; a build is a new baseline. A tombstone whose field type is a user type
     that was since deleted or renamed fails to compile. That edit is a rude edit in user code anyway, but the error
-    shows up in generated code.
+    shows up in generated code. The same holds for a kept method's parameter and return types.
+  - A method whose signature changes (same name) isn't kept: Roslyn deletes the old overload, and issue 4 applies if
+    the session added it. Generated code changes a signature when an `x:Bind` path's type changes.
   - Unnamed elements that aren't unique among their siblings get an indexed structural key (parent, member, type,
     position among same-type unnamed siblings), so an unchanged file keeps its IDs (Gallery: 543 ambiguous identities
     before, 0 after). Inserting an unnamed sibling of the same type before one shifts the IDs after it, among fields of

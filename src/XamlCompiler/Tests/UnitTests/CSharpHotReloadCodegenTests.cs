@@ -79,6 +79,122 @@ namespace UnitTests
             Assert.IsTrue(Regex.IsMatch(shell, @"public void Connect\([^)]*\)\s*\{\s*\}"), shell);
         }
 
+        // A live XamlTypeInfoProvider created its list of library providers (OtherProviders) before an update that added a
+        // package or project reference; the reset after an update rebuilds it, so the new library's types are found.
+        [TestMethod]
+        public void HotReload_TypeInfoResetRebuildsOtherProviders()
+        {
+            string reset = HotReloadReset(GenerateTypeInfoWithOtherProvider(hotReload: true, "FullXamlMetadataProvider"));
+            StringAssert.Contains(reset, "_otherProviders = null;");
+            StringAssert.Contains(reset, "_typeTable = null;");
+
+            // Filled from outside by AddOtherProvider: the list is not the provider's to rebuild.
+            string addedFromOutside = HotReloadReset(GenerateTypeInfoWithOtherProvider(hotReload: true, "FullXamlMetadataProvider, DoNotGenerateOtherProviders"));
+            Assert.IsFalse(addedFromOutside.Contains("_otherProviders"), addedFromOutside);
+
+            string normal = GenerateTypeInfoWithOtherProvider(hotReload: false, "FullXamlMetadataProvider");
+            Assert.IsFalse(normal.Contains("HotReloadResetIfUpdated"), normal);
+            StringAssert.Contains(normal, "_otherProviders = otherProviders;");
+        }
+
+        // Roslyn can't delete a method that an earlier update of the session added (NullReferenceException in
+        // DefinitionMap.GetPreviousMethodHandle): an x:Load element added and then removed takes UpdateUnloadedElement,
+        // CompleteUpdate, Update_<path> and the UnloadObject implementation with it. Removed methods are kept, inert.
+        [TestMethod]
+        public void HotReload_RemovedMethodsAreKeptInert()
+        {
+            const string before = @"namespace App
+{
+    partial class Page : global::Microsoft.UI.Xaml.Controls.Page, IThing
+    {
+        partial void UnloadObject(global::Microsoft.UI.Xaml.DependencyObject unloadableObject)
+        {
+            this.DisconnectUnloadedObject(6);
+        }
+        private void DisconnectUnloadedObject(int connectionId)
+        {
+            throw new global::System.ArgumentException(""Invalid connectionId."");
+        }
+        private void Update_Vm_Flag(global::System.Boolean obj, int phase)
+        {
+            this.Flag = obj;
+        }
+        private bool TryGet_Vm(out int value, int phase) => (value = phase) > 0;
+        public void Renamed(int a) { }
+        void IThing.Do() { }
+        private T Generic<T>() { return default; }
+        public Page() { }
+        partial void InitializeXProperties()
+        {
+        }
+    }
+}";
+            const string after = @"namespace App
+{
+    partial class Page : global::Microsoft.UI.Xaml.Controls.Page
+    {
+        private void DisconnectUnloadedObject(int connectionId)
+        {
+            throw new global::System.ArgumentException(""No unloadable elements to disconnect."");
+        }
+        public void Renamed(string b) { }
+    }
+}";
+            string restored = HotReloadRetiredMembers.Restore(after, before);
+            Match block = Regex.Match(restored, @"// Hot reload: removed from the markup.*?#pragma warning restore", RegexOptions.Singleline);
+            Assert.IsTrue(block.Success, restored);
+            string tombstones = block.Value;
+
+            StringAssert.Contains(tombstones, "partial void UnloadObject(global::Microsoft.UI.Xaml.DependencyObject unloadableObject) { }");
+            StringAssert.Contains(tombstones, "private void Update_Vm_Flag(global::System.Boolean obj, int phase) { }");
+            StringAssert.Contains(tombstones, "private bool TryGet_Vm(out int value, int phase) { value = default; return default; }");
+            // Live members win, whatever their signature; explicit interface implementations, generic methods,
+            // constructors and partial methods other than UnloadObject (their declaration may be gone too) are not kept.
+            Assert.AreEqual(1, Regex.Matches(restored, @"void DisconnectUnloadedObject\(").Count, restored);
+            Assert.IsFalse(tombstones.Contains("Renamed"), tombstones);
+            Assert.IsFalse(tombstones.Contains("IThing.Do"), tombstones);
+            Assert.IsFalse(tombstones.Contains("Generic"), tombstones);
+            Assert.IsFalse(tombstones.Contains("Page()"), tombstones);
+            Assert.IsFalse(tombstones.Contains("InitializeXProperties"), tombstones);
+        }
+
+        private string GenerateTypeInfoWithOtherProvider(bool hotReload, string codeGenFlags)
+        {
+            const string xaml = @"<Page xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+    xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+    xmlns:dll='using:LibManagedDll'>
+    <Page.Resources>
+        <dll:SimpleClass x:Key='key'/>
+    </Page.Resources>
+</Page>";
+            DirectUISchemaContext schema = _testHelper.LoadSchema(SchemaMode.ManagedRuntime | SchemaMode.LoadUserDll);
+            TypeInfoCollector collector = _testHelper.CollectTypes(xaml, schema);
+
+            // Any type stands in for a library's metadata provider: code generation only uses its name.
+            object provider = new TypeForCodeGen(schema.GetXamlType(new XamlTypeName("using:LibManagedDll", "SimpleClass"))).Instance;
+            var providers = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(provider.GetType()));
+            providers.Add(provider);
+            collector.SchemaInfo.Instance.GetType().GetProperty("OtherMetadataProviders").SetValue(collector.SchemaInfo.Instance, providers);
+
+            var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "HotReloadOtherProviders");
+            context.IsLibrary = true;
+            context.RootNamespace = "HotReloadOtherProviders";
+            context.ProjectInfo.SetCodeGenFlags(codeGenFlags);
+            context.ProjectInfo.IsHotReloadBuild = hotReload;
+            context.ProjectInfo.IsHotReloadCodeGen = hotReload;
+            List<FileNameAndContentPair> pairs = _testHelper.GenerateTypeInfo(false, collector.SchemaInfo, context.ProjectInfo,
+                new ClassName("HotReloadOtherProviders.App"), CodeGenLanguage.CSharp);
+            Assert.AreEqual(1, pairs.Count);
+            return pairs[0].Contents;
+        }
+
+        private static string HotReloadReset(string typeInfo)
+        {
+            Match reset = Regex.Match(typeInfo, @"private void HotReloadResetIfUpdated\(\)\s*\{.*?\n        \}", RegexOptions.Singleline);
+            Assert.IsTrue(reset.Success, typeInfo);
+            return reset.Value;
+        }
+
         private string Generate(bool hotReload)
         {
             var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "CSharpHotReloadCodegen");

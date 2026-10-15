@@ -22,13 +22,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     // retired Bindings class (IDataTemplateComponent.Recycle/ProcessBindings), and data sources raise events into
     // handlers those objects subscribed.
     //
+    // Methods are kept the same way (with an inert body) when no member of the same name is left. .NET hot reload can
+    // delete a method, but Roslyn fails (NullReferenceException in DefinitionMap.GetPreviousMethodHandle) when the method
+    // was added by an earlier update of the same session, for example an x:Load element's UpdateUnloadedElement.
+    //
     // The inventory of declared members lives with the connection ID ledger (in the build's output folder), one file
     // per class and generated file. A build is a new baseline: it records what it generated and puts nothing back.
     // A live member with the same name always wins over a tombstone (a changed field type is a real rude edit).
     internal static class HotReloadRetiredMembers
     {
-        private const string FolderName = "XamlHotReload";
-
         internal static string Apply(string stateFolder, string className, string generatedFileExtension, string generatedCode, bool restoreRetiredMembers)
         {
             string inventoryPath = GetInventoryPath(stateFolder, className, generatedFileExtension);
@@ -52,8 +54,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         internal static string GetInventoryPath(string stateFolder, string className, string generatedFileExtension)
         {
-            return Path.Combine(Path.GetFullPath(stateFolder), FolderName,
-                HotReloadConnectionIdLedgerSession.CreateFileStem(className) + generatedFileExtension + ".members.json");
+            return Path.Combine(HotReloadStatePaths.GetFolder(stateFolder),
+                HotReloadConnectionIdLedgerSession.CreateFileStem(className) + generatedFileExtension + HotReloadStatePaths.MembersExtension);
         }
 
         // For tests: the code without any of the members an inventory keeps (every field and nested type of every type),
@@ -61,7 +63,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal static string RemoveKeptMembers(string code)
         {
             var ranges = new List<(int Start, int End)>();
-            CollectKeptRanges(CSharpDeclarationScanner.Scan(code), ranges);
+            CollectKeptRanges(code, CSharpDeclarationScanner.Scan(code), ranges);
             var result = new StringBuilder(code.Length);
             int copied = 0;
             foreach ((int start, int end) in ranges.OrderBy(r => r.Start))
@@ -73,20 +75,89 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return result.ToString();
         }
 
-        private static void CollectKeptRanges(CSharpDeclaration container, List<(int Start, int End)> ranges)
+        private static void CollectKeptRanges(string code, CSharpDeclaration container, List<(int Start, int End)> ranges)
         {
             foreach (CSharpDeclaration member in container.Members)
             {
                 if (container.Kind == CSharpDeclarationKind.Type && !container.HasConditionalDirectives &&
-                    (member.Kind == CSharpDeclarationKind.Field || member.Kind == CSharpDeclarationKind.Type))
+                    (member.Kind == CSharpDeclarationKind.Field || member.Kind == CSharpDeclarationKind.Type ||
+                     (IsRetirableMethod(container, member) && CreateMethodTombstone(code, member, out _) != null)))
                 {
                     ranges.Add((member.Start, member.End));
                 }
                 else if (member.Kind == CSharpDeclarationKind.Type || member.Kind == CSharpDeclarationKind.Namespace)
                 {
-                    CollectKeptRanges(member, ranges);
+                    CollectKeptRanges(code, member, ranges);
                 }
             }
+        }
+
+        // An ordinary method with a body: what .NET hot reload would have to delete when the markup no longer generates it.
+        // Roslyn can't delete a method that an earlier update of the same session added (NullReferenceException in
+        // DefinitionMap.GetPreviousMethodHandle), so a removed method is kept with an inert body instead. Not kept:
+        // constructors, operators, explicit interface implementations (the type may no longer implement the interface),
+        // partial, extern and abstract methods, interface members and generic methods (Name is null for those).
+        private static bool IsRetirableMethod(CSharpDeclaration container, CSharpDeclaration member)
+        {
+            if (member.Kind != CSharpDeclarationKind.Body || container.Kind != CSharpDeclarationKind.Type || container.IsInterface ||
+                member.Name == null || !member.Name.EndsWith("()", StringComparison.Ordinal) ||
+                (member.BodyOpen < 0 && member.ArrowStart < 0))
+            {
+                return false;
+            }
+            string name = MethodName(member);
+            string typeName = container.Name;
+            int arity = typeName.IndexOf('`');
+            return name != (arity >= 0 ? typeName.Substring(0, arity) : typeName);
+        }
+
+        private static string MethodName(CSharpDeclaration member)
+        {
+            return member.Name.Substring(0, member.Name.Length - 2);
+        }
+
+        private static readonly HashSet<string> s_notRetirable = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "partial", "extern", "abstract", "operator", "implicit", "explicit", "delegate",
+        };
+
+        // Partial methods whose defining declaration pass 1 emits for every page, so an implementation part (in the .g.cs)
+        // can always be kept. An implementation that is dropped leaves the method unimplemented, and Roslyn then deletes it
+        // from metadata: UnloadObject is implemented only while the page has x:Load elements.
+        private static readonly HashSet<string> s_alwaysDeclaredPartialMethods = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "UnloadObject",
+        };
+
+        private static string MethodHeader(string code, CSharpDeclaration member)
+        {
+            return code.Substring(member.Start, (member.BodyOpen >= 0 ? member.BodyOpen : member.ArrowStart) - member.Start);
+        }
+
+        // Null when the header isn't one a tombstone can keep (see IsRetirableMethod).
+        private static string CreateMethodTombstone(string code, CSharpDeclaration member, out string parameters)
+        {
+            parameters = null;
+            string header = MethodHeader(code, member);
+            string core = StripAttributes(header);
+            int open = core.IndexOf('(');
+            if (open < 0)
+            {
+                return null;
+            }
+            string beforeParameters = core.Substring(0, open).TrimEnd();
+            string[] words = beforeParameters.Split(new[] { ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            bool alwaysDeclaredPartial = words.Contains("partial") && s_alwaysDeclaredPartialMethods.Contains(MethodName(member));
+            if (words.Any(w => s_notRetirable.Contains(w) && !(w == "partial" && alwaysDeclaredPartial)) ||
+                beforeParameters.EndsWith("." + MethodName(member), StringComparison.Ordinal))
+            {
+                return null;
+            }
+            int close = MatchingParenthesis(core, open);
+            parameters = System.Text.RegularExpressions.Regex.Replace(core.Substring(open + 1, Math.Max(0, close - open - 1)), @"\s+", " ").Trim();
+            // An inert body has no await: drop 'async' (its 'return default;' would not compile in an async Task method).
+            string kept = System.Text.RegularExpressions.Regex.Replace(header, @"\basync\s+", string.Empty);
+            return kept.TrimEnd() + " " + InertBody(kept);
         }
 
         internal static List<HotReloadMemberEntry> CreateInventory(string code)
@@ -199,6 +270,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                             Text = member.Kind == CSharpDeclarationKind.Type
                                 ? CreateTypeShell(code, member)
                                 : CreateFieldTombstone(code, member),
+                        });
+                    }
+                }
+                else if (container.Kind == CSharpDeclarationKind.Type && !container.HasConditionalDirectives && IsRetirableMethod(container, member))
+                {
+                    string text = CreateMethodTombstone(code, member, out string parameters);
+                    string key = container.Path + "/M:" + MethodName(member) + "(" + parameters + ")";
+                    if (text != null && !entries.ContainsKey(key))
+                    {
+                        entries.Add(key, new HotReloadMemberEntry
+                        {
+                            Key = key,
+                            Container = container.Path,
+                            Name = MethodName(member),
+                            Kind = "method",
+                            Text = text,
                         });
                     }
                 }
@@ -459,6 +546,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal int ArrowStart = -1;
         internal bool IsConst;
         internal bool IsEnum;
+        internal bool IsInterface;
         internal bool HasConditionalDirectives;
         internal List<CSharpDeclaration> Members = new List<CSharpDeclaration>();
     }
@@ -626,6 +714,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 member.Kind = CSharpDeclarationKind.Type;
                 member.IsEnum = tokens[keyword].Text == "enum";
+                member.IsInterface = tokens[keyword].Text == "interface";
                 member.Name = tokens[keyword + 1].Text + Arity(tokens, keyword + 2);
                 member.Path = path + "/" + member.Name;
                 return;
