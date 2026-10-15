@@ -14,6 +14,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
     {
         Dictionary<String, Assembly> _asmNameCache = new Dictionary<string, Assembly>();
         Dictionary<String, Type> _resolvedTypes = new Dictionary<string, Type>();
+        Dictionary<String, Assembly> _pathCache = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
 
         // The loader, which handles shared state (factory, dispenser), and provides convenience
         // operators for loading modules.
@@ -35,6 +36,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         public string ProjectPath { get; set; }
         public String[] ReferenceAssemblyPaths { get; set; }
 
+        /// <summary>
+        /// Read assembly files completely on load so none stays open (for long-lived hosts).
+        /// </summary>
+        public bool PrefetchFiles
+        {
+            get { return _loader.PrefetchFiles; }
+            set { _loader.PrefetchFiles = value; }
+        }
+
         public bool IsSystemAssemblyLoaded { get { return _systemAssembly != null; } }
 
         private Loader Loader { get { return _loader; } }
@@ -50,7 +60,110 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         public Assembly LoadAssemblyFromFile(string path)
         {
             string fullPath = Path.GetFullPath(path);
+
+            // Same answer as the name/location check in RegisterAssembly, without re-opening the
+            // file and re-reading its metadata (and leaking the handle) on every call.
+            Assembly cached;
+            if (_pathCache.TryGetValue(fullPath, out cached))
+            {
+                return cached;
+            }
+
             Assembly asm = Loader.ReadAssemblyFromFile(path);
+            asm = RegisterAssembly(asm);
+            _pathCache[fullPath] = asm;
+            return asm;
+        }
+
+        // True when a file at this full path is already loaded (no disk access).
+        public bool TryGetLoadedAssembly(string fullPath, out Assembly assembly)
+        {
+            return _pathCache.TryGetValue(fullPath, out assembly);
+        }
+
+        /// <summary>
+        /// Load an assembly from an in-memory PE image (for example a Roslyn emit), reporting
+        /// <paramref name="location"/> as its Location so it stands in for the file on disk.
+        /// </summary>
+        public Assembly LoadAssemblyFromImage(byte[] image, string location)
+        {
+            Assembly asm = Loader.ReadAssemblyFromByteArray(image, Path.GetFullPath(location));
+            return RegisterAssembly(asm);
+        }
+
+        /// <summary>
+        /// Remove an assembly (typically the project's own, about to be replaced by a newer build)
+        /// and every cached lookup that points at it, then release its metadata.
+        /// </summary>
+        public void UnloadAssembly(Assembly asm)
+        {
+            if (asm == null)
+            {
+                return;
+            }
+
+            RemoveAssembly(asm);
+
+            // Other assemblies cache name lookups too, including assembly-qualified names that
+            // resolved into this one (for example via the system assembly).
+            string simpleName = asm.GetName().Name;
+            foreach (Assembly other in Assemblies)
+            {
+                (other as MetadataOnlyAssembly)?.ForgetTypesFrom(asm, simpleName);
+            }
+            // The factory caches types by module path and token; a rebuilt assembly at the same
+            // path must not get the old types back.
+            if (_loader.Factory is XamlReflectionFactory factory)
+            {
+                foreach (Module module in asm.GetModules())
+                {
+                    factory.RemoveScope(module.FullyQualifiedName);
+                }
+            }
+            List<string> staleNames = new List<string>();
+            foreach (KeyValuePair<string, Assembly> entry in _asmNameCache)
+            {
+                if (ReferenceEquals(entry.Value, asm))
+                {
+                    staleNames.Add(entry.Key);
+                }
+            }
+            foreach (string name in staleNames)
+            {
+                _asmNameCache.Remove(name);
+            }
+
+            List<string> stalePaths = new List<string>();
+            foreach (KeyValuePair<string, Assembly> entry in _pathCache)
+            {
+                if (ReferenceEquals(entry.Value, asm))
+                {
+                    stalePaths.Add(entry.Key);
+                }
+            }
+            foreach (string path in stalePaths)
+            {
+                _pathCache.Remove(path);
+            }
+
+            List<string> staleTypes = new List<string>();
+            foreach (KeyValuePair<string, Type> entry in _resolvedTypes)
+            {
+                if (ReferenceEquals(entry.Value.Assembly, asm))
+                {
+                    staleTypes.Add(entry.Key);
+                }
+            }
+            foreach (string name in staleTypes)
+            {
+                _resolvedTypes.Remove(name);
+            }
+
+            (asm as IDisposable)?.Dispose();
+        }
+
+        private Assembly RegisterAssembly(Assembly asm)
+        {
             string asmName = asm.GetName().FullName;
 
             Assembly loadedAsm = null;
@@ -159,6 +272,21 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
                     // It isn't exactly right in the C++ case either but the differences are mitigated.
                     Assembly runtimeAssembly = typeof(int).Assembly;
                     path = runtimeAssembly.Location;
+#if NETCOREAPP
+                    // On .NET the core library is System.Private.CoreLib, not mscorlib, and nothing in a
+                    // native project's references resolves "mscorlib". Use the .NET Framework mscorlib that
+                    // the .NET Framework compiler would be running on, so both hosts see the same types.
+                    string frameworkMscorlib = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                        "Microsoft.NET",
+                        Environment.Is64BitProcess ? "Framework64" : "Framework",
+                        "v4.0.30319",
+                        "mscorlib.dll");
+                    if (File.Exists(frameworkMscorlib))
+                    {
+                        path = frameworkMscorlib;
+                    }
+#endif
                 }
                 try
                 {

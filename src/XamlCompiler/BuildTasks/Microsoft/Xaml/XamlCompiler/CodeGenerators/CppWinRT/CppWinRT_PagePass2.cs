@@ -616,7 +616,7 @@ this.Write("        }\r\n");
  HashSet<XamlType> staticAssertTypes = new HashSet<XamlType>();
  private void Output_StaticAssertTypeIsComplete(XamlType type, Indent indent = Indent.None)
  {
-     if(!XamlSchemaCodeInfo.IsProjectedPrimitiveCppType(type.ToString()) && !type.IsArray && !staticAssertTypes.Contains(type))
+     if(!XamlSchemaCodeInfo.IsProjectedPrimitiveCppType(PrimitiveLookupName(type)) && !type.IsArray && !staticAssertTypes.Contains(type))
      {
          staticAssertTypes.Add(type);
          PushIndent(indent);

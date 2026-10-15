@@ -119,6 +119,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Tasks
         public bool IgnoreSpecifiedTargetPlatformMinVersion { get; set; }
 
         public bool EnableHotReloadStableConnectionIds { get; set; }
+        public bool EnableXamlHotReload { get; set; }
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
         #endregion

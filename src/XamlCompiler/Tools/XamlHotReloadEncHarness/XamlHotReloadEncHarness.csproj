@@ -1,0 +1,30 @@
+<!-- Copyright (c) Microsoft Corporation. Licensed under the MIT License. See LICENSE in the project root for license information. -->
+<!--
+  Developer tool: replays a hot reload journey (XAML and code edits) through the XAML compiler service and the .NET SDK's
+  own edit-and-continue engine (the one behind dotnet watch), and reports for every save whether .NET hot reload can
+  apply the result: deltas, rude edits (ENCxxxx) or compile errors. Roslyn is not shipped with the tool: it is loaded from
+  the installed .NET SDK at run time, like a hot reload host would. Not part of the product build.
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <PlatformTarget>x64</PlatformTarget>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <SignAssembly>false</SignAssembly>
+    <DotNetSdkDirectory Condition="'$(DotNetSdkDirectory)' == ''">$(NetCoreRoot)sdk\$(NETCoreSdkVersion)\</DotNetSdkDirectory>
+    <RoslynBinCore>$(DotNetSdkDirectory)Roslyn\bincore\</RoslynBinCore>
+    <DotNetWatchDirectory>$(DotNetSdkDirectory)DotnetTools\dotnet-watch\$(NETCoreSdkVersion)\tools\net10.0\any\</DotNetWatchDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Microsoft.UI.Xaml.Markup.Compiler.csproj" SetTargetFramework="TargetFramework=net8.0" />
+    <ProjectReference Include="..\..\Exe\Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop\Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop.csproj" />
+    <Reference Include="Microsoft.CodeAnalysis" HintPath="$(RoslynBinCore)Microsoft.CodeAnalysis.dll" Private="false" />
+    <Reference Include="Microsoft.CodeAnalysis.CSharp" HintPath="$(RoslynBinCore)Microsoft.CodeAnalysis.CSharp.dll" Private="false" />
+    <Reference Include="Microsoft.CodeAnalysis.Workspaces" HintPath="$(DotNetWatchDirectory)Microsoft.CodeAnalysis.Workspaces.dll" Private="false" />
+    <Reference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" HintPath="$(DotNetWatchDirectory)Microsoft.CodeAnalysis.CSharp.Workspaces.dll" Private="false" />
+    <Reference Include="System.Composition.Runtime" HintPath="$(DotNetWatchDirectory)System.Composition.Runtime.dll" Private="false" />
+  </ItemGroup>
+</Project>

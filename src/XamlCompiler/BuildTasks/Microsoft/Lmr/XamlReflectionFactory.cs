@@ -32,5 +32,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             }
             return type;
         }
+
+        // Forget the types created for a module, so a newer build of the same file gets fresh ones.
+        public void RemoveScope(string fullyQualifiedName)
+        {
+            _scopeCache.Remove(fullyQualifiedName);
+        }
     }
 }

@@ -56,6 +56,11 @@ namespace System.Reflection.Adds
             {
                 return (Runtime.CompilerServices.RuntimeHelpers.GetHashCode(m_module) * 397) ^ m_handle.GetHashCode();
             }
+
+            public bool IsFrom(Assembly assembly)
+            {
+                return ReferenceEquals(m_module.Assembly, assembly);
+            }
         }
 
         // List of loaded assemblies. We need this so that we know what to unload.
@@ -105,6 +110,45 @@ namespace System.Reflection.Adds
             Debug.Assert(ia2.TypeUniverse == this);
 
             this.m_loadedAssemblies.Add(assembly);
+        }
+
+        /// <summary>
+        /// Remove an assembly from this universe and drop every cached lookup that resolved into it,
+        /// so a newer build of the same assembly can be added in its place. The caller is
+        /// responsible for disposing the removed assembly.
+        /// </summary>
+        public void RemoveAssembly(Assembly assembly)
+        {
+            this.m_loadedAssemblies.RemoveAll(a => ReferenceEquals(a, assembly));
+
+            List<string> staleTypeNames = new List<string>();
+            string simpleName = assembly.GetName().Name;
+            foreach (KeyValuePair<string, Type> entry in m_hash)
+            {
+                // Over-removal only costs a cache miss; also catch generic instantiations over the assembly's types.
+                if ((entry.Value != null && ReferenceEquals(entry.Value.Assembly, assembly)) ||
+                    entry.Key.IndexOf(simpleName, StringComparison.Ordinal) >= 0)
+                {
+                    staleTypeNames.Add(entry.Key);
+                }
+            }
+            foreach (string name in staleTypeNames)
+            {
+                m_hash.Remove(name);
+            }
+
+            List<AssemblyReferenceKey> staleReferences = new List<AssemblyReferenceKey>();
+            foreach (KeyValuePair<AssemblyReferenceKey, Assembly> entry in m_assemblyReferences)
+            {
+                if (ReferenceEquals(entry.Value, assembly) || entry.Key.IsFrom(assembly))
+                {
+                    staleReferences.Add(entry.Key);
+                }
+            }
+            foreach (AssemblyReferenceKey key in staleReferences)
+            {
+                m_assemblyReferences.Remove(key);
+            }
         }
 
         /// <summary>

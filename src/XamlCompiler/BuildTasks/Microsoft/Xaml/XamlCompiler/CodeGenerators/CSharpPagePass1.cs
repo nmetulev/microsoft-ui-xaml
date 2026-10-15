@@ -96,6 +96,8 @@ this.Write("\r\n        public void InitializeComponent(global::System.Uri resou
 this.Write("            if (_contentLoaded)\r\n                return;\r\n\r\n            _contentL" +
         "oaded = true;\r\n\r\n");
 
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadBeforeLoadComponent()));
+
          if (Model.XProperties.Any()) 
          { 
 this.Write("        InitializeXProperties();\r\n");
@@ -155,6 +157,8 @@ this.Write(this.ToStringHelper.ToStringWithCulture(loadType));
 this.Write(");\r\n");
 
          } 
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadAfterLoadComponent()));
+
 this.Write("        }\r\n\r\n        partial void UnloadObject(");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.DependencyObject)));

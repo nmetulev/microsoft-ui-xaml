@@ -423,7 +423,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+                 }#>
             #pragma warning restore 649
 <#+             } #>
-            private bool initialized = false;
+            private bool initialized<#=DefaultInitializer("false")#>;
             private const int NOT_PHASED = (1 << 31);
             private const int DATA_CHANGED = (1 << 30);
 <#+             if (bindUniverse.DistinctConvertersUsed.Count() > 0) #>
@@ -436,7 +436,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+             }#>
 <#+             if (bindUniverse.NeedsIDataTemplateExtension) #>
 <#+             { #>
-            private bool removedDataContextHandler = false;
+            private bool removedDataContextHandler<#=DefaultInitializer("false")#>;
 <#+             } #>
 
             // Fields for each control that has bindings.
@@ -479,7 +479,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+                 {#>
 <#+                     foreach (BindAssignment ba in bindElement.BindAssignments)#>
 <#+                     {#>
-            private static bool <#=ba.DisableFlagName#> = false;
+            private static bool <#=ba.DisableFlagName#><#=DefaultInitializer("false")#>;
 <#+                     }#>
 <#+                 }#>
 <#+             }#>
@@ -913,7 +913,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
             {
 <#+             if (bindUniverse.NeedsBindingsTracking)#>
 <#+             {#>
-                this.bindingsTracking.ReleaseAllListeners();
+                this.bindingsTracking<#=HotReloadNullConditional#>.ReleaseAllListeners();
                 this.initialized = false;
 <#+             }#>
             }
@@ -1025,12 +1025,12 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 
             public void Activated(object obj, <#=Globalize(KnownNamespaces.Xaml)#>.WindowActivatedEventArgs data)
             {
-                this.Initialize();
+<#=HotReloadRetiredBindingsGuard("obj")#>                this.Initialize();
             }
 
             public void Loading(<#=Globalize(KnownTypes.FrameworkElement)#> src, object data)
             {
-                this.Initialize();
+<#=HotReloadRetiredBindingsGuard("src")#>                this.Initialize();
             }
 <#+             }#>
 <#+             if (bindUniverse.DistinctConvertersUsed.Count() > 0) #>
@@ -1350,12 +1350,12 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+             string cacheName = "bindings.dataRoot"; #>
 <#+                     if (!(step is RootStep))#>
 <#+                     {#>
-                private <#=step.ValueType#> cache_<#=step.CodeName#> = null;
+                private <#=step.ValueType#> cache_<#=step.CodeName#><#=DefaultInitializer("null")#>;
 <#+                 cacheName="cache_" +step.CodeName;#>
 <#+                     }#>
 <#+                     foreach (DependencyPropertyStep child in step.TrackingSteps.OfType<DependencyPropertyStep>())#>
 <#+                     {#>
-                private long tokenDPC_<#=child.CodeName#> = 0;
+                private long tokenDPC_<#=child.CodeName#><#=DefaultInitializer("0")#>;
 <#+                     }#>
 <#+                     if (step.RequiresChildNotification)#>
 <#+                     {#>

@@ -69,7 +69,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             if (bindUniverse == null)
             {
                 bool isFileRoot = !DomHelper.UnderANamescope(domObject) && !DomHelper.IsDerivedFromControlTemplate(domObject) && !DomHelper.IsDerivedFromDataTemplate(domObject);
-                bindUniverse = new BindUniverse(this, dataRootType, isFileRoot, classCodeInfo.ClassName.ShortName);
+                bindUniverse = new BindUniverse(this, dataRootType, isFileRoot, classCodeInfo.ClassName.ShortName, classCodeInfo.IsHotReloadCodeGen);
             }
             this.BindUniverse = bindUniverse;
 

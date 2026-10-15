@@ -133,6 +133,29 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get { return _userMemberInfo; }
         }
 
+        // Hot reload builds: the type and member tables in a canonical order (by name, ordinal) instead of the order in
+        // which the compile happened to meet them. That order depends on what a long-lived compiler service looked up
+        // before, so without this a service compile and a build can number XamlTypeInfo differently.
+        public void SortForHotReload()
+        {
+            _typeTable.Sort((a, b) => String.CompareOrdinal(a.SystemName, b.SystemName));
+            for (int i = 0; i < _typeTable.Count; i++)
+            {
+                _typeTable[i].ResetTypeIndex(i);
+            }
+            _userTypeInfo.Sort((a, b) => String.CompareOrdinal(a.SystemName, b.SystemName));
+            Comparison<InternalXamlUserMemberInfo> byMember = (a, b) =>
+            {
+                int result = String.CompareOrdinal(a.DeclaringType.SystemName, b.DeclaringType.SystemName);
+                return result != 0 ? result : String.CompareOrdinal(a.Name, b.Name);
+            };
+            _userMemberInfo.Sort(byMember);
+            foreach (InternalXamlUserTypeInfo userType in _userTypeInfo)
+            {
+                userType.Members.Sort(byMember);
+            }
+        }
+
         public bool TryFindType(string systemName, out InternalTypeEntry type)
         {
             foreach (InternalTypeEntry ixType in _typeTable)

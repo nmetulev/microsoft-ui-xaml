@@ -62,7 +62,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 
             _contentLoaded = true;
 
-<#+         if (Model.XProperties.Any()) #>
+<#=HotReloadBeforeLoadComponent()#><#+         if (Model.XProperties.Any()) #>
 <#+         { #>
         InitializeXProperties();
 <#+         } #>
@@ -86,7 +86,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+         { #>
             <#=Globalize(KnownTypes.Application)#>.LoadComponent(this, resourceLocator, <#=Globalize(KnownTypes.ComponentResourceLocation)#>.<#=loadType#>);
 <#+         } #>
-        }
+<#=HotReloadAfterLoadComponent()#>        }
 
         partial void UnloadObject(<#=Globalize(KnownTypes.DependencyObject)#> unloadableObject);
 <#+     } #>
