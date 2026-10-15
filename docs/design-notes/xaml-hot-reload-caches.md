@@ -169,18 +169,53 @@ workaround. A clean build's constructor would add them again.
 Otherwise a dictionary loaded again subtracts the previous load's count from the new table. This is not what makes
 setting `Source` again fail with E_FAIL (see below); that still fails with the fix.
 
+### Root properties removed from the markup stayed set
+
+*Measured*: page-reinit and page-reinit-reset. Running replaced markup again on a live page left properties that only
+the old markup set, for example `Tag` on `<Page>`. That happened in both modes, with or without fresh resources. A
+clean build, or a re-created page, doesn't have them.
+
+Fix (`core/Parser/ObjectWriterRuntime.cpp`, `dxaml/lib/FrameworkApplication_Partial.cpp`,
+`dxaml/lib/XamlHotReloadComponents.cpp`):
+
+- In stamped apps, `LoadComponent` points a thread-local (`XamlHotReloadOverrides::t_rootRecording`) at the
+  component's root while it parses.
+- `ObjectWriterRuntime::SetValueImpl` adds the index of every native or custom property it sets on that root. Text
+  and compiled markup both go through it.
+- After a successful load, once hot reload is active, the properties the previous load recorded and this one didn't
+  are cleared with `ClearValue`.
+- A failed load clears nothing, and both reload paths get the fix: `InitializeComponent` run again (C#) and
+  `ReloadComponents` (any language).
+
+Known limit: if code changed such a property after the first load and the new markup no longer sets it, the code's
+value is cleared too. In a clean build that code would run again; an in-place reload doesn't run code-behind.
+
+### Loading live components again: IXamlHotReloadService2
+
+Tools for languages without a managed agent (C++/WinRT) can't reach every live component. XAML diagnostics doesn't
+expose the `Window` object behind a window's content, and pages may live in hosts that code created.
+`IXamlHotReloadService2` (`XamlOM.WinUI.idl`) derives from `IXamlHotReloadService` and has its own IID, so a tool can
+QI for it and fall back to a restart on older runtimes. It adds:
+
+- `ReloadComponents(uri, &count)` runs `Application.LoadComponent` again on every live component loaded from `uri`:
+  pages, user controls, windows, the application, and dictionaries with `x:Class`.
+  - It uses the URI and resource location the component was first loaded with.
+  - Each component loads on its own UI thread: inline when the caller is that thread, otherwise through that thread's
+    `DispatcherQueue`. The call waits up to 30 seconds.
+  - Every load gets the fresh-resources and removed-root-properties behavior above. A failed load keeps the
+    component's previous content (the parser assigns root content last) and resources.
+  - It returns the number loaded and the first failure.
+- `GetLiveComponents(uri, &count, &components)` returns the calling thread's components, so a tool can save
+  per-instance state before a reload. For example, a C++ tool can keep the page a window's `Frame` showed, because
+  that page was navigated to in code.
+
+`Application.LoadComponent` tracks components in `XamlHotReload::ComponentTable` (`core/inc/XamlHotReloadRegistry.h`),
+only in stamped apps. Each entry holds a weak reference, the owning thread's `DispatcherQueue`, the URI and the root
+properties of the last load. Weak references are resolved only on the owning thread. Dead entries are dropped when the
+same URI loads again on that thread.
+
 ## Not handled (proposals)
 
-- **Root attributes removed from the markup.** Re-running `InitializeComponent` on a live page leaves properties that
-  only the old markup set (for example `Tag` or `Background` on `<Page>`). *Measured*: page-reinit and
-  page-reinit-reset in both modes, with and without this branch. A clean build or a re-created page (approach C)
-  doesn't have them. Text and compiled markup both set root properties through
-  `ObjectWriterCommonRuntime::SetValue` → `ObjectWriterRuntime::SetValueImpl`, which can compare the instance with
-  `m_spContext->get_RootInstance()`. The runtime could record the root properties a `LoadComponent` sets there, and
-  clear them before replaced markup is loaded again. That needs per-component storage. To keep the cost near zero, the
-  recording would be limited to apps that carry the hot reload stamp, which needs the stamp check moved to startup.
-  This is a design decision for the WinUI team. Until then, tools that reload in place should re-create a page whose
-  root element's attributes changed, or report it.
 - **Text vs compiled resource deferral.** Compiled markup defers every keyed resource, ThemeDictionaries included,
   until it is looked up. Text markup creates them eagerly unless the dictionary has at least 128 nodes and only keyed
   items (`CResourceDictionary::ShouldDeferNodeStream`). *Measured*: deferral, where text creates 4 resources and
@@ -203,5 +238,7 @@ setting `Source` again fail with E_FAIL (see below); that still fails with the f
 - The implicit style flag costs one thread-local read, only on the path where the diagnostics feature is enabled.
 - The dictionary mark is one bit set after each `LoadComponent`.
 - The reset is skipped until a tool replaces markup (`IsActive()` is an atomic pointer load).
+- Component tracking and root-property recording happen only in apps with the hot reload stamp
+  (`IsEnabledForApp()`, computed once). Elsewhere the parser pays one thread-local read per property it sets.
 - Everything else in the prototype was already behind the generation counters, or behind the hot reload stamp and an
   attached diagnostics tool.

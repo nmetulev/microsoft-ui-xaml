@@ -1,0 +1,8 @@
+<Window
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="probe-v2">
+    <StackPanel>
+        <TextBlock AutomationProperties.AutomationId="WindowMarker" Text="window-v2" />
+    </StackPanel>
+</Window>
