@@ -316,62 +316,50 @@ namespace DirectUI
 
         #pragma endregion
 
-        #pragma region Side provider registry (experimental)
+        #pragma region Registered metadata providers (XamlMetadataProviderRegistry)
 
-        // EXPERIMENTAL. Registers an additional IXamlMetadataProvider that is consulted *after* the
-        // application's own provider has declined a name. This exists so tooling can teach a running
-        // process about types that did not exist when the application's generated type tables were
-        // compiled, without regenerating those fixed-size tables.
+        // Adds an IXamlMetadataProvider consulted *after* the application's own provider declines a name, so types
+        // from a library loaded while the app runs (a plugin, or types a tool created) can be created from markup.
+        // Backs Microsoft.UI.Xaml.Markup.XamlMetadataProviderRegistry.Register and IXamlHotReloadService.
         //
-        // Registration is additive and idempotent:
-        //   - the application provider always wins, so an already resolvable type keeps its identity;
-        //   - registering the same provider instance twice reports AlreadyRegistered and is a no-op;
-        //   - a provider that answers for a name an existing side provider already owns is rejected
-        //     with Conflict and is NOT registered.
+        //   - Additive: the application's provider always wins, so a type that already resolves keeps its identity.
+        //   - Idempotent: the same provider (COM identity) again reports AlreadyRegistered and changes nothing.
+        //   - A provider that describes a name already in use as a *different* type is refused with Conflict. One that
+        //     describes it as the same type (two plugins sharing a library) joins as a co-owner.
+        //   - On success, cached misses are forgotten (here and, through XamlTypeCacheGenerations, in each UI
+        //     thread's parser), so names that failed before can resolve now.
         //
-        // Thread contract: safe to call from any thread. The registry is mutated under CStaticLock,
-        // but the supplied provider is probed for conflicts *without* that lock held, so a provider
-        // implementation may safely call back into the metadata API during registration. If another
-        // thread mutates the registry during that probe the call is Refused with
-        // ConcurrentModification and may be retried.
+        // Threading: any thread. Registry state is changed under CStaticLock; the candidate is probed without it, so
+        // it may call back into XAML. A registry change on another thread during the probe is retried internally.
+        // On the lookup path providers are called with CStaticLock held, exactly like the application's provider.
         //
-        // Note the lookup path is different, and is pre-existing behaviour rather than something
-        // this registry introduces: MetadataAPI::TryGetClassInfoByFullName holds CStaticLock across
-        // ImportClassInfoFromMetadataProvider, so a side provider is invoked with that lock held,
-        // exactly as the application's own provider already is. CStaticLock is a CRITICAL_SECTION and
-        // is therefore recursive for the owning thread, but a side provider must still avoid blocking
-        // on another lock while it answers.
-        //
-        // Lifetime: the registry holds a strong reference for as long as the provider is registered,
-        // so the caller does not have to keep the provider alive. References are dropped by
-        // UnregisterSideMetadataProvider and by MetadataAPI::Reset/Destroy.
+        // Lifetime: the registry holds a strong reference until UnregisterSideMetadataProvider or Reset/Destroy.
         static XamlMetadataProviderRegistrationResult RegisterSideMetadataProvider(
             _In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider);
 
-        // EXPERIMENTAL. Removes a previously registered side provider. Types that already resolved
-        // through it keep resolving: this only stops the provider from answering *new* lookups.
-        static XamlMetadataProviderRegistrationResult UnregisterSideMetadataProvider(
-            _In_ XamlMetadataProviderId providerId);
+        // Removes a registered provider and releases it. Every name that resolved to a type only it (and no other
+        // registered provider) supplied is forgotten here and, through XamlTypeCacheGenerations, by each UI thread's
+        // parser on its next use, so markup naming those types fails the way an unknown type does. Objects already
+        // created, and markup already parsed into templates, keep working: their type entries (and the IXamlType
+        // objects behind them) stay alive for the life of the process.
+        static XamlMetadataProviderUnregistrationResult UnregisterSideMetadataProvider(
+            _In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider);
 
-        // EXPERIMENTAL. Evicts cached *unresolved* type names so that a newly registered provider can
-        // be observed for a name that previously failed to resolve. Entries that resolved to a real
-        // type are never evicted. Passing a name evicts just that name; the no-argument overload
-        // evicts every cached miss.
-        //
-        // Note that this only invalidates the metadata-level cache. The parser keeps its own negative
-        // cache per xml namespace (XamlXmlNamespace::m_mapKnownNotFoundTypes); a host that resolves
-        // names through the parser must also bump XamlHotReloadOverrides::g_typeGeneration, which each parser
-        // thread checks before trusting its cached misses.
+        static bool IsSideMetadataProviderRegistered(_In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider);
+
+        // Evicts cached *unresolved* type names so a provider can be observed for a name that previously failed to
+        // resolve. Entries that resolved to a real type are never evicted. Passing a name evicts just that name; the
+        // no-argument overload evicts every cached miss. Register does this itself; this is for tools that made new
+        // types available some other way. Parser caches are told through XamlTypeCacheGenerations::g_typesAdded.
         static XamlMetadataCacheInvalidationResult InvalidateUnresolvedTypeCache(
             _In_ const xstring_ptr_view& strTypeFullName);
 
         static XamlMetadataCacheInvalidationResult InvalidateUnresolvedTypeCache();
 
-        // EXPERIMENTAL. The current registry generation. Bumped by every successful registration,
-        // unregistration and invalidation, so a caller can prove its change was observed.
+        // The current registry generation. Bumped by every successful registration, unregistration and invalidation,
+        // so a caller can prove its change was observed.
         static XamlMetadataProviderGeneration GetMetadataProviderGeneration();
 
-        // EXPERIMENTAL. Number of currently registered side providers.
         static std::size_t GetSideMetadataProviderCount();
 
         #pragma endregion
@@ -442,13 +430,18 @@ namespace DirectUI
             _In_ const xstring_ptr_view& strName);
 
     private:
-        // Resolves a type full name through the registered side providers. Returns a null type when
-        // no side provider answers, and also when more than one answers: duplicate answers fail
-        // closed so that resolution never depends on registration order.
-        // The providers are invoked without CStaticLock held.
+        // Resolves a name through the registered providers (see XamlMetadataProviderRegistry::Registry::Resolve):
+        // null when none answers, and also when they disagree about what the name is, so resolution never depends
+        // on registration order. On success *pClaim is the claim to tag the imported type with.
         static _Check_return_ HRESULT TryResolveThroughSideMetadataProviders(
-            _In_ const xstring_ptr_view& strTypeFullName,
-            _Outptr_result_maybenull_ xaml_markup::IXamlType** ppXamlType);
+            _In_ const xstring_ptr_view& strName,
+            _In_ bool byTypeName,
+            _In_ wxaml_interop::TypeKind typeKind,
+            _Outptr_result_maybenull_ xaml_markup::IXamlType** ppXamlType,
+            _Out_ std::uint64_t* pClaim);
+
+        // Tags a type just imported from a registered provider with the claim that records who supplied it.
+        static void TagSideProviderType(_In_ const CClassInfo* pType, _In_ std::uint64_t claim);
 
         // Associates a dependency property with a type in a runtime cache.
         static _Check_return_ HRESULT AssociateDependencyProperty(_In_ const CClassInfo* pType, _In_ const CDependencyProperty* pProperty);

@@ -2355,6 +2355,15 @@ namespace Microsoft.UI.Xaml.Markup
         static void UnloadObject(Microsoft.UI.Xaml.DependencyObject element);
     };
 
+    [contract(Microsoft.UI.Xaml.WinUIContract, 12)]
+    [webhosthidden]
+    runtimeclass XamlMetadataProviderRegistry
+    {
+        static void Register(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider);
+        static Boolean Unregister(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider);
+        static Boolean IsRegistered(Microsoft.UI.Xaml.Markup.IXamlMetadataProvider provider);
+    };
+
     [contract(Microsoft.UI.Xaml.WinUIContract, 1)]
     [webhosthidden]
     [default_interface]

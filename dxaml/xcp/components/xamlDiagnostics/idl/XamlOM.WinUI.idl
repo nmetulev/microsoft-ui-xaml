@@ -118,8 +118,10 @@ interface IXamlHotReloadService : IUnknown
     HRESULT UnadviseComponentLoaded(
         [in] DWORD cookie);
 
-    // Adds a provider (Microsoft.UI.Xaml.Markup.IXamlMetadataProvider) consulted after the app's own one, for types
-    // created while the app runs. It can only supply names that would otherwise not resolve.
+    // Same as Microsoft.UI.Xaml.Markup.XamlMetadataProviderRegistry.Register (the general API, usable without a
+    // diagnostics tool), gated on the hot reload stamp: adds a provider (Microsoft.UI.Xaml.Markup.IXamlMetadataProvider)
+    // consulted after the app's own one, for types created while the app runs. It can only supply names that would
+    // otherwise not resolve. Unregister with XamlMetadataProviderRegistry.Unregister.
     HRESULT RegisterMetadataProvider(
         [in] IInspectable* provider);
 

@@ -133,6 +133,9 @@ private:
     // The hot reload markup generation this cache was filled under (see XamlHotReloadOverrides.h).
     std::uint32_t m_hotReloadGeneration = 0;
 
+    // XamlTypeCacheGenerations::g_typesRemoved when this cache was filled.
+    std::uint32_t m_typesRemovedGeneration = 0;
+
     // Resources in long term storage by the file they map, kept across Flush() so a reload of the same file
     // after a flush reuses its existing mapping (and XBFv2 reader) instead of mapping the file again.
     std::unordered_map<xstring_ptr, xref_ptr<IPALResource>> m_fileToStoredXbfResource;

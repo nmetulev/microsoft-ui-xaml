@@ -2,7 +2,7 @@
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #include "precomp.h"
-#include <XamlHotReloadOverrides.h>
+#include <XamlTypeCacheGenerations.h>
 #include "xamlxmlnamespace.h"
 
 _Check_return_ HRESULT 
@@ -77,14 +77,21 @@ XamlXmlNamespace::GetXamlTypeImpl(
     // ... but first lets see if we have already looked for, but didn't find,
     // this type by checking m_mapKnownNotFoundTypes
     //
+    // Types may have become available, or been withdrawn, since these maps were filled (XamlTypeCacheGenerations).
+    const std::uint32_t typesRemoved = XamlTypeCacheGenerations::g_typesRemoved.load(std::memory_order_relaxed);
+    if (typesRemoved != m_resolvedTypeGeneration)
+    {
+        m_resolvedTypeGeneration = typesRemoved;
+        m_mapNameToXamlType.clear();
+    }
+
     auto itXamlType = m_mapNameToXamlType.find(inTypeName);
     if (itXamlType == m_mapNameToXamlType.end())
     {
-        // Hot reload: types may have become available since these misses were recorded.
-        const std::uint32_t typeGeneration = XamlHotReloadOverrides::g_typeGeneration.load(std::memory_order_relaxed);
-        if (typeGeneration != m_knownNotFoundTypeGeneration)
+        const std::uint32_t typesAdded = XamlTypeCacheGenerations::g_typesAdded.load(std::memory_order_relaxed);
+        if (typesAdded != m_knownNotFoundTypeGeneration)
         {
-            m_knownNotFoundTypeGeneration = typeGeneration;
+            m_knownNotFoundTypeGeneration = typesAdded;
             m_mapKnownNotFoundTypes.clear();
         }
 

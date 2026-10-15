@@ -114,6 +114,7 @@
         <ClCompile Include="..\ContextRequestedEventArgs_Partial.cpp"/>
         <ClCompile Include="..\UtilityFunctions.cpp"/>
         <ClCompile Include="..\XamlMarkupHelper_Partial.cpp"/>
+        <ClCompile Include="..\XamlMetadataProviderRegistry_Partial.cpp"/>
         <ClCompile Include="..\XamlLight_Partial.cpp"/>
         <ClCompile Include="..\PointerSourceWrapper.cpp"/>
         <ClCompile Include="..\MarkupExtension_Partial.cpp"/>

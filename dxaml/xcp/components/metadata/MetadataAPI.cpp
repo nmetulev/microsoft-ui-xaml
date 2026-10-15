@@ -18,6 +18,7 @@
 #include <xcptypes.h>
 #include "TypeNameHelper.h"
 #include "stack_vector.h"
+#include <XamlTypeCacheGenerations.h>
 
 using namespace DirectUI;
 
@@ -718,17 +719,20 @@ _Check_return_ HRESULT MetadataAPI::ImportClassInfoFromMetadataProvider(_In_ con
         IFC_RETURN(spMetadataProvider->GetXamlTypeByFullName(strTypeFullNamePromoted.GetHSTRING(), &spXamlType));
     }
 
+    std::uint64_t sideProviderClaim = XamlMetadataProviderRegistry::c_invalidClaimId;
     if (spXamlType == nullptr)
     {
-        // The application's own provider does not know this name. Fall back to any side provider
-        // registered after startup. This ordering is what keeps registration additive: a side
+        // The application's own provider does not know this name. Fall back to the providers registered after
+        // startup (XamlMetadataProviderRegistry). This ordering is what keeps registration additive: a registered
         // provider can only ever supply a name that would otherwise have failed to resolve.
-        IFC_RETURN(TryResolveThroughSideMetadataProviders(strTypeFullName, &spXamlType));
+        IFC_RETURN(TryResolveThroughSideMetadataProviders(
+            strTypeFullName, false /* byTypeName */, wxaml_interop::TypeKind_Metadata, &spXamlType, &sideProviderClaim));
     }
 
     if (spXamlType != nullptr)
     {
         IFC_RETURN(ImportClassInfo(spXamlType.Get(), ppType));
+        TagSideProviderType(*ppType, sideProviderClaim);
     }
     else
     {
@@ -753,17 +757,21 @@ _Check_return_ HRESULT MetadataAPI::ImportClassInfoFromMetadataProvider(_In_ wxa
         IFC_RETURN(spMetadataProvider->GetXamlType(typeName, &spXamlType));
     }
 
+    std::uint64_t sideProviderClaim = XamlMetadataProviderRegistry::c_invalidClaimId;
     if (spXamlType == nullptr && typeName.Name != nullptr)
     {
-        // See the by-name overload: side providers are a fallback only.
-        xstring_ptr strTypeFullName;
-        IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(typeName.Name, &strTypeFullName));
-        IFC_RETURN(TryResolveThroughSideMetadataProviders(strTypeFullName, &spXamlType));
+        // See the by-name overload: registered providers are a fallback only. Non-WinRT (.NET) types are asked for
+        // by TypeName, since their name is assembly-qualified; others by full name, as the application's provider is.
+        xstring_ptr strTypeName;
+        IFC_RETURN(xstring_ptr::CloneRuntimeStringHandle(typeName.Name, &strTypeName));
+        const bool byTypeName = typeName.Kind == wxaml_interop::TypeKind_Custom;
+        IFC_RETURN(TryResolveThroughSideMetadataProviders(strTypeName, byTypeName, typeName.Kind, &spXamlType, &sideProviderClaim));
     }
 
     if (spXamlType != nullptr)
     {
         IFC_RETURN(ImportClassInfo(spXamlType.Get(), ppType));
+        TagSideProviderType(*ppType, sideProviderClaim);
     }
     else
     {
@@ -1030,268 +1038,291 @@ void MetadataAPI::OverrideMetadataProvider(_In_opt_ xaml_markup::IXamlMetadataPr
     storage->m_metadataProvider = nullptr;
 }
 
-#pragma region Side provider registry (experimental)
+#pragma region Registered metadata providers (XamlMetadataProviderRegistry)
 
 namespace
 {
-    // Snapshots the registered side providers so that they can be invoked without CStaticLock held.
-    // Calling out to a provider while holding the static lock risks deadlock, because providers are
-    // user code that can re-enter the metadata API.
-    void SnapshotSideProviders(
-        _Out_ std::vector<DynamicMetadataStorage::SideMetadataProviderEntry>& snapshot,
-        _Out_ XamlMetadataProviderGeneration* pGeneration)
+    using SideRegistry = DynamicMetadataStorage::SideMetadataProviderRegistry;
+
+    // Registration can lose a race with another thread changing the registry while the candidate is probed. It is
+    // retried this many times before the caller is told (E_CHANGED_STATE).
+    constexpr int c_maxRegistrationAttempts = 8;
+
+    // COM identity, so the same provider reached through different interface pointers (a .NET object's CCW, for
+    // example) is recognized as one provider.
+    _Check_return_ HRESULT GetProviderIdentity(
+        _In_ xaml_markup::IXamlMetadataProvider* provider,
+        _Out_ ctl::ComPtr<IUnknown>& identity)
     {
-        DynamicMetadataStorageInstanceWithLock storage;
-        snapshot = storage->m_sideMetadataProviders;
-        *pGeneration = storage->m_metadataProviderGeneration;
+        identity = nullptr;
+        return provider->QueryInterface(IID_PPV_ARGS(identity.ReleaseAndGetAddressOf()));
     }
 
-    // Asks a single provider for a type by full name. A provider that fails is treated as declining,
-    // so one broken side provider cannot take down resolution for the whole process.
-    bool TryGetTypeFromProvider(
+    // Asks provider the question lookup describes. *answered is false when it doesn't know the name.
+    _Check_return_ HRESULT AskProvider(
         _In_ xaml_markup::IXamlMetadataProvider* provider,
-        _In_ HSTRING fullName,
-        _Out_ ctl::ComPtr<xaml_markup::IXamlType>& xamlType)
+        _In_ const SideRegistry::LookupT& lookup,
+        _Out_ ctl::ComPtr<xaml_markup::IXamlType>& type)
     {
-        xamlType = nullptr;
+        type = nullptr;
 
-        ctl::ComPtr<xaml_markup::IXamlType> result;
-        if (FAILED(provider->GetXamlTypeByFullName(fullName, result.ReleaseAndGetAddressOf())))
+        xruntime_string_ptr promoted;
+        IFC_RETURN(lookup.Name.Promote(&promoted));
+
+        if (lookup.ByTypeName)
         {
-            return false;
+            wxaml_interop::TypeName typeName = {};
+            typeName.Name = promoted.GetHSTRING();
+            typeName.Kind = static_cast<wxaml_interop::TypeKind>(lookup.TypeKind);
+            IFC_RETURN(provider->GetXamlType(typeName, type.ReleaseAndGetAddressOf()));
+        }
+        else
+        {
+            IFC_RETURN(provider->GetXamlTypeByFullName(promoted.GetHSTRING(), type.ReleaseAndGetAddressOf()));
         }
 
-        xamlType = result;
-        return xamlType != nullptr;
+        return S_OK;
+    }
+
+    // What type an answer describes: its underlying TypeName. Equal keys from two providers are one type.
+    _Check_return_ HRESULT GetTypeKey(_In_ xaml_markup::IXamlType* type, _Out_ SideRegistry::KeyT& key)
+    {
+        wxaml_interop::TypeName typeName = {};
+        IFC_RETURN(type->get_UnderlyingType(&typeName));
+
+        const HRESULT hr = xstring_ptr::CloneRuntimeStringHandle(typeName.Name, &key.Name);
+        key.IsCustom = typeName.Kind == wxaml_interop::TypeKind_Custom;
+        WindowsDeleteString(typeName.Name);
+        return hr;
+    }
+
+    bool IsSideProviderType(_In_ const CClassInfo* type)
+    {
+        return type != nullptr &&
+               !MetadataAPI::IsKnownIndex(type->GetIndex()) &&
+               static_cast<const CCustomClassInfo*>(type)->GetSideProviderClaim() != XamlMetadataProviderRegistry::c_invalidClaimId;
+    }
+
+    bool IsUnresolvedPlaceholder(_In_ const CClassInfo* type)
+    {
+        return type != nullptr &&
+               !MetadataAPI::IsKnownIndex(type->GetIndex()) &&
+               static_cast<const CCustomClassInfo*>(type)->IsUnresolvedPlaceholder();
+    }
+
+    // Removes every name -> type mapping whose type matches shouldEvict. The CCustomClassInfo objects themselves stay
+    // in m_customTypesCache: KnownTypeIndex values are dense indices into it, and live objects refer to them.
+    template <typename TPredicate>
+    std::size_t EvictTypeNames(_In_ DynamicMetadataStorage* storage, TPredicate&& shouldEvict)
+    {
+        std::size_t evicted = 0;
+        auto evictFrom = [&](containers::vector_map<xstring_ptr, const CClassInfo*>& cache)
+        {
+            for (auto it = cache.begin(); it != cache.end();)
+            {
+                if (shouldEvict(it->second))
+                {
+                    it = cache.erase(it);
+                    ++evicted;
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        };
+
+        evictFrom(storage->m_customTypesByNameCache);
+        evictFrom(storage->m_customTypesByCustomNameCache);
+        return evicted;
     }
 }
 
-// Resolves a type full name through the registered side providers.
-//
-// Every registered provider is asked, even after one has answered, so that a duplicate answer is
-// detected rather than masked by registration order. If more than one provider answers we fail
-// closed and report no type at all: an ambiguous name must not silently bind to whichever provider
-// happened to run first.
 _Check_return_ HRESULT MetadataAPI::TryResolveThroughSideMetadataProviders(
-    _In_ const xstring_ptr_view& strTypeFullName,
-    _Outptr_result_maybenull_ xaml_markup::IXamlType** ppXamlType)
+    _In_ const xstring_ptr_view& strName,
+    _In_ bool byTypeName,
+    _In_ wxaml_interop::TypeKind typeKind,
+    _Outptr_result_maybenull_ xaml_markup::IXamlType** ppXamlType,
+    _Out_ std::uint64_t* pClaim)
 {
     *ppXamlType = nullptr;
+    *pClaim = XamlMetadataProviderRegistry::c_invalidClaimId;
 
-    std::vector<DynamicMetadataStorage::SideMetadataProviderEntry> providers;
-    XamlMetadataProviderGeneration observedGeneration = 0;
-    SnapshotSideProviders(providers, &observedGeneration);
-
-    if (providers.empty())
+    std::vector<SideRegistry::Entry> providers;
     {
-        return S_OK;
-    }
-
-    xruntime_string_ptr strTypeFullNamePromoted;
-    IFC_RETURN(strTypeFullName.Promote(&strTypeFullNamePromoted));
-
-    ctl::ComPtr<xaml_markup::IXamlType> resolvedType;
-    XamlMetadataProviderId resolvedBy = c_invalidXamlMetadataProviderId;
-    bool ambiguous = false;
-
-    for (const auto& entry : providers)
-    {
-        ctl::ComPtr<xaml_markup::IXamlType> candidate;
-        if (!TryGetTypeFromProvider(entry.m_provider.Get(), strTypeFullNamePromoted.GetHSTRING(), candidate))
-        {
-            continue;
-        }
-
-        if (resolvedType != nullptr)
-        {
-            // A second provider answered for the same name. Fail closed.
-            ambiguous = true;
-            break;
-        }
-
-        resolvedType = candidate;
-        resolvedBy = entry.m_id;
-    }
-
-    if (ambiguous || resolvedType == nullptr)
-    {
-        return S_OK;
-    }
-
-    // Record which provider owns this name so that a later registration that would duplicate it can
-    // be rejected. Only record if the registry has not moved underneath us; if it has, the next
-    // lookup will recompute the claim anyway.
-    {
-        xstring_ptr strFullNameStorage;
-        IFC_RETURN(strTypeFullName.Promote(&strFullNameStorage));
-
         DynamicMetadataStorageInstanceWithLock storage;
-        if (storage->m_metadataProviderGeneration == observedGeneration)
+        if (storage->m_sideMetadataProviders.Count() == 0)
         {
-            storage->m_sideMetadataProviderClaims[strFullNameStorage] = resolvedBy;
+            return S_OK;
         }
+        providers = storage->m_sideMetadataProviders.Snapshot();
     }
 
-    *ppXamlType = resolvedType.Detach();
+    SideRegistry::LookupT lookup;
+    IFC_RETURN(strName.Promote(&lookup.Name));
+    lookup.ByTypeName = byTypeName;
+    lookup.TypeKind = static_cast<std::uint8_t>(typeKind);
+
+    // A provider that fails is treated as declining, so one broken provider can't break resolution for everyone.
+    auto outcome = SideRegistry::Resolve(providers,
+        [&](const SideRegistry::Entry& entry, SideRegistry::KeyT& key, ctl::ComPtr<xaml_markup::IXamlType>& answer)
+        {
+            return SUCCEEDED(AskProvider(entry.Provider.Get(), lookup, answer)) &&
+                   answer != nullptr &&
+                   SUCCEEDED(GetTypeKey(answer.Get(), key));
+        });
+
+    if (outcome.Status != SideRegistry::ResolveStatus::Resolved)
+    {
+        // Ambiguous names (registered providers disagree about what the name is) resolve to nothing, like unknown
+        // names, so the outcome never depends on registration order.
+        return S_OK;
+    }
+
+    std::uint64_t claim = XamlMetadataProviderRegistry::c_invalidClaimId;
+    {
+        DynamicMetadataStorageInstanceWithLock storage;
+        claim = storage->m_sideMetadataProviders.RecordClaim(lookup, outcome);
+    }
+
+    // c_invalidClaimId: every provider that answered was unregistered while we asked. Treat the name as unknown.
+    if (claim != XamlMetadataProviderRegistry::c_invalidClaimId)
+    {
+        *pClaim = claim;
+        IFC_RETURN(outcome.Answer.CopyTo(ppXamlType));
+    }
 
     return S_OK;
+}
+
+void MetadataAPI::TagSideProviderType(_In_ const CClassInfo* pType, _In_ std::uint64_t claim)
+{
+    if (claim != XamlMetadataProviderRegistry::c_invalidClaimId && pType != nullptr && !IsKnownIndex(pType->GetIndex()))
+    {
+        DynamicMetadataStorageInstanceWithLock storage;
+        const_cast<CCustomClassInfo*>(static_cast<const CCustomClassInfo*>(pType))->SetSideProviderClaim(claim);
+    }
 }
 
 XamlMetadataProviderRegistrationResult MetadataAPI::RegisterSideMetadataProvider(
     _In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider)
 {
-    XamlMetadataProviderRegistrationResult result;
-
-    if (pMetadataProvider == nullptr)
+    ctl::ComPtr<xaml_markup::IXamlMetadataProvider> provider(pMetadataProvider);
+    ctl::ComPtr<IUnknown> identity;
+    if (provider && FAILED(GetProviderIdentity(provider.Get(), identity)))
     {
-        DynamicMetadataStorageInstanceWithLock storage;
-        result.Status = XamlMetadataProviderRegistrationStatus::Refused;
-        result.Reason = XamlMetadataProviderRefusalReason::NullProvider;
-        result.Generation = storage->m_metadataProviderGeneration;
-        return result;
+        provider = nullptr;
     }
 
-    // Phase 1: observe the registry, and collect the names existing side providers already own.
-    XamlMetadataProviderGeneration observedGeneration = 0;
-    std::vector<xstring_ptr> claimedNames;
+    XamlMetadataProviderRegistrationResult result;
+    for (int attempt = 0; attempt < c_maxRegistrationAttempts; ++attempt)
     {
-        DynamicMetadataStorageInstanceWithLock storage;
-
-        for (const auto& entry : storage->m_sideMetadataProviders)
+        // Phase 1, under the lock: is it already registered, is there room, and which names must it be asked about?
+        SideRegistry::RegisterTicket ticket;
         {
-            if (entry.m_provider.Get() == pMetadataProvider)
+            DynamicMetadataStorageInstanceWithLock storage;
+            ticket = storage->m_sideMetadataProviders.BeginRegister(provider, identity.Get());
+        }
+
+        // Phase 2, without the lock: ask the candidate about every name already supplied by a registered provider.
+        std::vector<SideRegistry::ProbeAnswer> answers;
+        if (!ticket.Decided)
+        {
+            answers.resize(ticket.Probes.size());
+            for (std::size_t i = 0; i < ticket.Probes.size(); ++i)
             {
-                // Registration is idempotent: report the original id and leave the generation alone.
-                result.Status = XamlMetadataProviderRegistrationStatus::AlreadyRegistered;
-                result.ProviderId = entry.m_id;
-                result.Generation = storage->m_metadataProviderGeneration;
-                return result;
+                ctl::ComPtr<xaml_markup::IXamlType> type;
+                if (FAILED(AskProvider(provider.Get(), ticket.Probes[i].Lookup, type)))
+                {
+                    answers[i].Failed = true;
+                    break;
+                }
+                if (type != nullptr)
+                {
+                    answers[i].Answered = true;
+                    answers[i].Failed = FAILED(GetTypeKey(type.Get(), answers[i].Actual));
+                }
             }
         }
 
-        if (storage->m_sideMetadataProviders.size() >= c_maxSideXamlMetadataProviders)
+        // Phase 3, under the lock: commit only if nothing changed meanwhile.
         {
-            result.Status = XamlMetadataProviderRegistrationStatus::Refused;
-            result.Reason = XamlMetadataProviderRefusalReason::RegistryFull;
-            result.Generation = storage->m_metadataProviderGeneration;
-            return result;
+            DynamicMetadataStorageInstanceWithLock storage;
+            result = storage->m_sideMetadataProviders.CommitRegister(provider, identity.Get(), ticket, answers);
+
+            if (result.Status == XamlMetadataProviderRegistrationStatus::Succeeded)
+            {
+                // Names that failed to resolve may resolve now.
+                EvictTypeNames(storage.operator->(), IsUnresolvedPlaceholder);
+            }
         }
 
-        observedGeneration = storage->m_metadataProviderGeneration;
-
-        claimedNames.reserve(storage->m_sideMetadataProviderClaims.size());
-        for (const auto& claim : storage->m_sideMetadataProviderClaims)
+        if (result.Reason != XamlMetadataProviderRefusalReason::ConcurrentModification)
         {
-            claimedNames.push_back(claim.first);
-        }
-    }
-
-    // Phase 2: probe the candidate *without* the lock held, since this calls out to user code.
-    bool conflicts = false;
-    bool providerFailed = false;
-    for (const auto& claimedName : claimedNames)
-    {
-        xruntime_string_ptr claimedNamePromoted;
-        if (FAILED(claimedName.Promote(&claimedNamePromoted)))
-        {
-            providerFailed = true;
-            break;
-        }
-
-        ctl::ComPtr<xaml_markup::IXamlType> candidate;
-        if (TryGetTypeFromProvider(pMetadataProvider, claimedNamePromoted.GetHSTRING(), candidate))
-        {
-            conflicts = true;
             break;
         }
     }
 
-    // Phase 3: commit, but only if nothing moved while we were probing.
+    if (result.Status == XamlMetadataProviderRegistrationStatus::Succeeded)
     {
-        DynamicMetadataStorageInstanceWithLock storage;
-
-        if (storage->m_metadataProviderGeneration != observedGeneration)
-        {
-            result.Status = XamlMetadataProviderRegistrationStatus::Refused;
-            result.Reason = XamlMetadataProviderRefusalReason::ConcurrentModification;
-            result.Generation = storage->m_metadataProviderGeneration;
-            return result;
-        }
-
-        if (providerFailed)
-        {
-            result.Status = XamlMetadataProviderRegistrationStatus::Refused;
-            result.Reason = XamlMetadataProviderRefusalReason::ProviderFailed;
-            result.Generation = storage->m_metadataProviderGeneration;
-            return result;
-        }
-
-        if (conflicts)
-        {
-            result.Status = XamlMetadataProviderRegistrationStatus::Conflict;
-            result.Generation = storage->m_metadataProviderGeneration;
-            return result;
-        }
-
-        DynamicMetadataStorage::SideMetadataProviderEntry entry;
-        entry.m_provider = pMetadataProvider;
-        entry.m_id = storage->m_nextSideMetadataProviderId++;
-        entry.m_registeredAtGeneration = ++storage->m_metadataProviderGeneration;
-
-        storage->m_sideMetadataProviders.push_back(entry);
-
-        result.Status = XamlMetadataProviderRegistrationStatus::Registered;
-        result.ProviderId = entry.m_id;
-        result.Generation = storage->m_metadataProviderGeneration;
+        XamlTypeCacheGenerations::g_typesAdded.fetch_add(1, std::memory_order_relaxed);
     }
 
     return result;
 }
 
-XamlMetadataProviderRegistrationResult MetadataAPI::UnregisterSideMetadataProvider(
-    _In_ XamlMetadataProviderId providerId)
+XamlMetadataProviderUnregistrationResult MetadataAPI::UnregisterSideMetadataProvider(
+    _In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider)
 {
-    XamlMetadataProviderRegistrationResult result;
-
-    DynamicMetadataStorageInstanceWithLock storage;
-
-    auto it = std::find_if(
-        storage->m_sideMetadataProviders.begin(),
-        storage->m_sideMetadataProviders.end(),
-        [providerId](const DynamicMetadataStorage::SideMetadataProviderEntry& entry)
-        {
-            return entry.m_id == providerId;
-        });
-
-    if (it == storage->m_sideMetadataProviders.end())
+    ctl::ComPtr<IUnknown> identity;
+    if (pMetadataProvider != nullptr)
     {
-        result.Status = XamlMetadataProviderRegistrationStatus::Refused;
-        result.Reason = XamlMetadataProviderRefusalReason::UnknownProviderId;
-        result.Generation = storage->m_metadataProviderGeneration;
-        return result;
+        IGNOREHR(GetProviderIdentity(pMetadataProvider, identity));
     }
 
-    storage->m_sideMetadataProviders.erase(it);
-
-    // Drop this provider's name claims so that another provider may take them over later. Types that
-    // already resolved keep resolving: they live in m_customTypesByNameCache and are untouched here.
-    for (auto claim = storage->m_sideMetadataProviderClaims.begin(); claim != storage->m_sideMetadataProviderClaims.end();)
+    XamlMetadataProviderUnregistrationResult result;
     {
-        if (claim->second == providerId)
+        // The caller holds its own reference to the provider, so the registry's release below is never the final
+        // one and no provider code runs under the lock.
+        DynamicMetadataStorageInstanceWithLock storage;
+        result = storage->m_sideMetadataProviders.Unregister(identity.Get());
+
+        if (result.Status == XamlMetadataProviderRegistrationStatus::Succeeded)
         {
-            claim = storage->m_sideMetadataProviderClaims.erase(claim);
-        }
-        else
-        {
-            ++claim;
+            const auto& orphaned = result.OrphanedClaims;
+            EvictTypeNames(storage.operator->(), [&orphaned](const CClassInfo* type)
+            {
+                // Types nobody supplies any more are forgotten, and so are misses: a name that was ambiguous while
+                // this provider was registered may resolve now.
+                if (IsUnresolvedPlaceholder(type))
+                {
+                    return true;
+                }
+                return IsSideProviderType(type) &&
+                    std::find(orphaned.begin(), orphaned.end(), static_cast<const CCustomClassInfo*>(type)->GetSideProviderClaim()) != orphaned.end();
+            });
         }
     }
 
-    result.Status = XamlMetadataProviderRegistrationStatus::Registered;
-    result.ProviderId = providerId;
-    result.Generation = ++storage->m_metadataProviderGeneration;
+    if (result.Status == XamlMetadataProviderRegistrationStatus::Succeeded)
+    {
+        XamlTypeCacheGenerations::g_typesRemoved.fetch_add(1, std::memory_order_relaxed);
+        XamlTypeCacheGenerations::g_typesAdded.fetch_add(1, std::memory_order_relaxed);
+    }
 
     return result;
+}
+
+bool MetadataAPI::IsSideMetadataProviderRegistered(_In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider)
+{
+    ctl::ComPtr<IUnknown> identity;
+    if (pMetadataProvider == nullptr || FAILED(GetProviderIdentity(pMetadataProvider, identity)))
+    {
+        return false;
+    }
+
+    DynamicMetadataStorageInstanceWithLock storage;
+    return storage->m_sideMetadataProviders.IsRegistered(identity.Get());
 }
 
 XamlMetadataCacheInvalidationResult MetadataAPI::InvalidateUnresolvedTypeCache(
@@ -1301,38 +1332,22 @@ XamlMetadataCacheInvalidationResult MetadataAPI::InvalidateUnresolvedTypeCache(
 
     DynamicMetadataStorageInstanceWithLock storage;
 
-    // Only cached *misses* are evicted. A name that resolved to a real type keeps its CClassInfo,
-    // so identity is stable across registration. The placeholder itself stays in m_customTypesCache
-    // because KnownTypeIndex values are dense indices into that vector; removing an element would
-    // invalidate every later index.
+    // Only cached *misses* are evicted. A name that resolved to a real type keeps its CClassInfo, so identity is
+    // stable across registration.
     auto evictFrom = [&](containers::vector_map<xstring_ptr, const CClassInfo*>& cache)
     {
         auto it = cache.find(strTypeFullName);
-        if (it == cache.end())
+        if (it != cache.end() && IsUnresolvedPlaceholder(it->second))
         {
-            return;
+            cache.erase(it);
+            ++result.UnresolvedEntriesEvicted;
         }
-
-        const CClassInfo* type = it->second;
-        if (type == nullptr || MetadataAPI::IsKnownIndex(type->GetIndex()))
-        {
-            return;
-        }
-
-        const CCustomClassInfo* customType = static_cast<const CCustomClassInfo*>(type);
-        if (!customType->IsUnresolvedPlaceholder())
-        {
-            return;
-        }
-
-        cache.erase(it);
-        ++result.UnresolvedEntriesEvicted;
     };
 
     evictFrom(storage->m_customTypesByNameCache);
     evictFrom(storage->m_customTypesByCustomNameCache);
 
-    result.Generation = ++storage->m_metadataProviderGeneration;
+    result.Generation = storage->m_sideMetadataProviders.BumpGeneration();
 
     return result;
 }
@@ -1342,33 +1357,8 @@ XamlMetadataCacheInvalidationResult MetadataAPI::InvalidateUnresolvedTypeCache()
     XamlMetadataCacheInvalidationResult result;
 
     DynamicMetadataStorageInstanceWithLock storage;
-
-    auto evictAllFrom = [&](containers::vector_map<xstring_ptr, const CClassInfo*>& cache)
-    {
-        for (auto it = cache.begin(); it != cache.end();)
-        {
-            const CClassInfo* type = it->second;
-            const bool isUnresolved =
-                type != nullptr &&
-                !MetadataAPI::IsKnownIndex(type->GetIndex()) &&
-                static_cast<const CCustomClassInfo*>(type)->IsUnresolvedPlaceholder();
-
-            if (isUnresolved)
-            {
-                it = cache.erase(it);
-                ++result.UnresolvedEntriesEvicted;
-            }
-            else
-            {
-                ++it;
-            }
-        }
-    };
-
-    evictAllFrom(storage->m_customTypesByNameCache);
-    evictAllFrom(storage->m_customTypesByCustomNameCache);
-
-    result.Generation = ++storage->m_metadataProviderGeneration;
+    result.UnresolvedEntriesEvicted = EvictTypeNames(storage.operator->(), IsUnresolvedPlaceholder);
+    result.Generation = storage->m_sideMetadataProviders.BumpGeneration();
 
     return result;
 }
@@ -1376,13 +1366,13 @@ XamlMetadataCacheInvalidationResult MetadataAPI::InvalidateUnresolvedTypeCache()
 XamlMetadataProviderGeneration MetadataAPI::GetMetadataProviderGeneration()
 {
     DynamicMetadataStorageInstanceWithLock storage;
-    return storage->m_metadataProviderGeneration;
+    return storage->m_sideMetadataProviders.GetGeneration();
 }
 
 std::size_t MetadataAPI::GetSideMetadataProviderCount()
 {
     DynamicMetadataStorageInstanceWithLock storage;
-    return storage->m_sideMetadataProviders.size();
+    return storage->m_sideMetadataProviders.Count();
 }
 
 #pragma endregion

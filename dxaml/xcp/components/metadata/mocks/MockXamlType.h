@@ -53,9 +53,11 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
 
             Microsoft::WRL::ComPtr<MockXamlType> WithFullName(wrl_wrappers::HString fullName)
             {
-                GetFullNameCallback = [&fullName](HSTRING* value) -> HRESULT
+                // HString is move-only, so the callback shares ownership rather than referring to this parameter.
+                auto name = std::make_shared<wrl_wrappers::HString>(std::move(fullName));
+                GetFullNameCallback = [name](HSTRING* value) -> HRESULT
                 {
-                    return fullName.CopyTo(value);
+                    return name->CopyTo(value);
                 };
                 return this;
             }
