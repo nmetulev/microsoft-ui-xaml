@@ -24,7 +24,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     public sealed class XamlCompilerService : IDisposable
     {
         /// <summary>Bumped on every change a host can observe; see Tools\API-CHANGES.txt.</summary>
-        public const int ApiVersion = 3;
+        public const int ApiVersion = 4;
 
         private CompilerInputs _pass2Inputs;
         // The build's pages, plus pages added since (new files) and minus removed ones.
@@ -135,6 +135,17 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             var known = new HashSet<string>(pages.Select(FullPathOf), StringComparer.OrdinalIgnoreCase);
             pages.AddRange(_xamlPages.Where(p => !known.Contains(FullPathOf(p)) && File.Exists(FullPathOf(p)) &&
                 !(_pass2Inputs.XamlPages ?? new List<MSBuildItem>()).Any(o => string.Equals(FullPathOf(o), FullPathOf(p), StringComparison.OrdinalIgnoreCase))));
+            // MarkupCompilePass1 writes pass 1 inputs to the same input.json: no LocalAssembly or SDK pages. Keep the
+            // previous ones, so pass 2 still gets the project's assembly (and the host's image stands in for it).
+            if (newInputs.LocalAssembly == null || newInputs.LocalAssembly.Count == 0)
+            {
+                newInputs.LocalAssembly = _pass2Inputs.LocalAssembly;
+                result.KeptLocalAssembly = newInputs.LocalAssembly != null && newInputs.LocalAssembly.Count > 0;
+            }
+            if (newInputs.SdkXamlPages == null || newInputs.SdkXamlPages.Count == 0)
+            {
+                newInputs.SdkXamlPages = _pass2Inputs.SdkXamlPages;
+            }
             _pass2Inputs = newInputs;
             _xamlPages.Clear();
             _xamlPages.AddRange(pages);
@@ -217,7 +228,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 var core = new CompileXamlInternal();
                 core.Log = log;
                 core.TaskFileService = new BuildTaskFileService(_pass2Inputs.LanguageSourceExtension);
-                core.PopulateFromCompilerInputs(CreateInputs(isPass1, localAssemblyPath));
+                core.PopulateFromCompilerInputs(CreateInputs(isPass1, localAssemblyPath, localAssemblyImage != null));
                 core.SaveState = _savedState;
                 core.ServiceXamlFilesToCompile = new HashSet<string>(
                     xamlFiles.Select(f => Path.GetFullPath(Path.Combine(ProjectFolder, f))),
@@ -276,13 +287,20 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return requested.Any(r => string.Equals(Path.GetFileNameWithoutExtension(r), name, StringComparison.OrdinalIgnoreCase));
         }
 
-        private CompilerInputs CreateInputs(bool isPass1, string localAssemblyPath)
+        private CompilerInputs CreateInputs(bool isPass1, string localAssemblyPath, bool hasImage = false)
         {
             CompilerInputs i = _pass2Inputs;
             List<MSBuildItem> localAssembly = i.LocalAssembly;
             if (!isPass1 && localAssemblyPath != null)
             {
                 localAssembly = new List<MSBuildItem> { new MSBuildItem { ItemSpec = localAssemblyPath, FullPath = Path.GetFullPath(localAssemblyPath) } };
+            }
+            else if (!isPass1 && hasImage && (localAssembly == null || localAssembly.Count == 0))
+            {
+                // Pass 1 inputs (no LocalAssembly): the image needs a location to stand in for, where the build puts it.
+                string name = !string.IsNullOrEmpty(i.TargetFileName) ? Path.GetFileNameWithoutExtension(i.TargetFileName) : i.ProjectName;
+                string path = Path.Combine(i.OutputPath ?? string.Empty, "intermediatexaml", name + ".dll");
+                localAssembly = new List<MSBuildItem> { new MSBuildItem { ItemSpec = path, FullPath = Path.GetFullPath(Path.Combine(ProjectFolder, path)) } };
             }
             var copy = new CompilerInputs
             {
@@ -405,6 +423,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         /// <summary>Loaded files that were unloaded: rebuilt or deleted on disk, or no longer referenced.</summary>
         public List<string> Released { get; } = new List<string>();
+
+        /// <summary>
+        /// True when the new inputs had no LocalAssembly (pass 1 inputs, as MarkupCompilePass1 writes them) and the
+        /// previous one was kept.
+        /// </summary>
+        public bool KeptLocalAssembly { get; internal set; }
 
         /// <summary>True when a framework or WinUI reference changed and the whole type universe was released.</summary>
         public bool FullReset { get; internal set; }
