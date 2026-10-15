@@ -70,3 +70,10 @@ v4, additive: type information check
     type information from the per-page cache also collects every page again without the cache. If the two
     XamlTypeInfo files differ, the compile fails with WMC9998 (first differing line in the message) and returns the
     full collection's XamlTypeInfo. Markers: "type info check" (identical/different, ms). About doubles that compile.
+
+Host duty (no API change), Roslyn issues 3 and 5 in the design note
+  * GeneratedText can hold files with no code: a ResourceDictionary without x:Class gets " \r\n" .g.cs/.i.g.cs (as in a
+    build). Adding such a file to the workspace, like a generated file that changed only in '#pragma checksum', is a
+    no-change update that Roslyn commits without a new baseline; the next update of a method added during the session
+    then throws NullReferenceException (GetPreviousMethodHandle or GetDeletedSynthesizedMethods). Hold both back and
+    hand them over with the next real change.
