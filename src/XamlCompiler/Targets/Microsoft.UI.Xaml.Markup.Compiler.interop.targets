@@ -779,8 +779,11 @@ Licensed under the MIT License. See LICENSE in the project root for license info
         <PropertyGroup>
             <XamlCompilerExeInputJson>$(XamlGeneratedOutputPath)\input.json</XamlCompilerExeInputJson>
             <XamlCompilerExeOutputJson>$(XamlGeneratedOutputPath)\output.json</XamlCompilerExeOutputJson>
+            <!-- XAML hot reload: a host starts the compiler service from these pass 2 inputs. The executable path writes them
+                 for its own use; the in-process path (Visual Studio's MSBuild) writes them only in hot reload builds. -->
+            <_XamlWriteHotReloadInputs Condition="'$(UseXamlCompilerExecutable)' != 'true' AND '$(EnableXamlHotReload)' == 'true'">true</_XamlWriteHotReloadInputs>
         </PropertyGroup>
-        <InputSerializer Condition="'$(UseXamlCompilerExecutable)' == 'true'"
+        <InputSerializer Condition="'$(UseXamlCompilerExecutable)' == 'true' OR '$(_XamlWriteHotReloadInputs)' == 'true'"
             JsonFilePath="$(XamlCompilerExeInputJson)"
             LanguageSourceExtension="$(DefaultLanguageSourceExtension)"
             Language="$(XamlLanguage)"
