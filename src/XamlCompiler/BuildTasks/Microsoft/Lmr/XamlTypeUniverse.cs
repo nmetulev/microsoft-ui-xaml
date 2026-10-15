@@ -15,6 +15,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         Dictionary<String, Assembly> _asmNameCache = new Dictionary<string, Assembly>();
         Dictionary<String, Type> _resolvedTypes = new Dictionary<string, Type>();
         Dictionary<String, Assembly> _pathCache = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
+        // Size and last write time of each file when it was loaded, so the compiler service can tell which changed.
+        Dictionary<String, KeyValuePair<long, DateTime>> _fileStamps = new Dictionary<string, KeyValuePair<long, DateTime>>(StringComparer.OrdinalIgnoreCase);
 
         // The loader, which handles shared state (factory, dispenser), and provides convenience
         // operators for loading modules.
@@ -72,7 +74,35 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             Assembly asm = Loader.ReadAssemblyFromFile(path);
             asm = RegisterAssembly(asm);
             _pathCache[fullPath] = asm;
+            _fileStamps[fullPath] = GetFileStamp(fullPath);
             return asm;
+        }
+
+        private static KeyValuePair<long, DateTime> GetFileStamp(string fullPath)
+        {
+            FileInfo info = new FileInfo(fullPath);
+            return info.Exists ? new KeyValuePair<long, DateTime>(info.Length, info.LastWriteTimeUtc) : new KeyValuePair<long, DateTime>(-1, DateTime.MinValue);
+        }
+
+        /// <summary>Every assembly loaded from a file, by full path.</summary>
+        public IEnumerable<KeyValuePair<string, Assembly>> LoadedFiles
+        {
+            get { return new List<KeyValuePair<string, Assembly>>(_pathCache); }
+        }
+
+        /// <summary>Loaded files that were deleted, or rewritten (different size or time) since they were loaded.</summary>
+        public List<KeyValuePair<string, Assembly>> GetChangedFiles()
+        {
+            List<KeyValuePair<string, Assembly>> changed = new List<KeyValuePair<string, Assembly>>();
+            foreach (KeyValuePair<string, Assembly> entry in _pathCache)
+            {
+                KeyValuePair<long, DateTime> stamp;
+                if (!_fileStamps.TryGetValue(entry.Key, out stamp) || !stamp.Equals(GetFileStamp(entry.Key)))
+                {
+                    changed.Add(entry);
+                }
+            }
+            return changed;
         }
 
         // True when a file at this full path is already loaded (no disk access).
@@ -144,6 +174,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             foreach (string path in stalePaths)
             {
                 _pathCache.Remove(path);
+                _fileStamps.Remove(path);
             }
 
             List<string> staleTypes = new List<string>();

@@ -6,6 +6,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Linq;
     using System.Reflection;
     using Lmr;
 
@@ -42,6 +43,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
         public void AddLocalAssemblyToTypeNameMap(Assembly localAssembly)
         {
             this.AddWinmdAssembly(localAssembly, true);
+        }
+
+        /// <summary>
+        /// The compiler service, after it reloaded references: add the referenced assemblies the map doesn't know yet
+        /// (CLR before WinMD, as <see cref="InitializeTypeNameMap"/> does), so the map is what a fresh compile would build.
+        /// </summary>
+        public void AddReferenceAssemblies(IEnumerable<Assembly> assemblies)
+        {
+            List<Assembly> newAssemblies = assemblies.Where(a => a != null && !knownAssemblies.Contains(a.ToString())).Distinct().ToList();
+            if (newAssemblies.Count == 0)
+            {
+                return;
+            }
+            this.AddClrAssemblies(newAssemblies.Where(a => a.GetName().ContentType != AssemblyContentType.WindowsRuntime));
+            this.AddWinmdAssemblies(newAssemblies.Where(a => a.GetName().ContentType == AssemblyContentType.WindowsRuntime &&
+                !a.GetName().Name.Equals("platform", StringComparison.OrdinalIgnoreCase)));
         }
 
         /// <summary>

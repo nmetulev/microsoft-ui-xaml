@@ -1524,6 +1524,56 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             s_typeUniverse.UnloadAssembly(previous);
         }
 
+        // The compiler service, when the project's references changed (a package or project reference added, removed or
+        // rebuilt): unload every loaded file that was rewritten or deleted since it was loaded, and every former
+        // reference that is no longer referenced, with every cache that points at them; the next compile loads the new
+        // files. Framework and WinUI metadata is cached in too many places, so a change there releases the whole type
+        // universe instead (the next compile is a cold one). Returns false in that case.
+        // Set by a reload; the next service compile adds the new references to the type name map.
+        private static bool s_serviceReferencesReloaded;
+
+        internal static bool ReleaseChangedServiceReferences(ISet<string> noLongerReferenced, IList<string> released)
+        {
+            s_serviceReferencesReloaded = true;
+            if (s_typeUniverse == null)
+            {
+                return true;
+            }
+            var stale = s_typeUniverse.GetChangedFiles()
+                .Concat(s_typeUniverse.LoadedFiles.Where(f => noLongerReferenced.Contains(f.Key)))
+                .Where(f => !ReferenceEquals(f.Value, s_serviceLocalAssembly))
+                .GroupBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(f => f.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (stale.Any(f => IsCoreReference(f.Value)))
+            {
+                new CompileXamlInternal().UnloadReferences();
+                foreach (var f in stale)
+                {
+                    released.Add(f.Key);
+                }
+                return false;
+            }
+            foreach (var f in stale)
+            {
+                s_typeResolver?.RemoveAssemblyFromTypeNameMap(f.Value);
+                DirectUI.ReflectionHelper.Release(f.Value);
+                s_typeUniverse.UnloadAssembly(f.Value);
+                released.Add(f.Key);
+            }
+            return true;
+        }
+
+        private static bool IsCoreReference(Assembly assembly)
+        {
+            string name = assembly.GetName().Name;
+            return name == "mscorlib" || name == "netstandard" || name == "System.Runtime" || name == "System.Private.CoreLib" ||
+                name == "WinRT.Runtime" || name == "Microsoft.Windows.SDK.NET" || name == "Microsoft.WinUI" ||
+                name.StartsWith("Microsoft.UI", StringComparison.OrdinalIgnoreCase) ||
+                name.StartsWith("Windows.", StringComparison.OrdinalIgnoreCase) || name == "Windows";
+        }
+
         public void UnloadReferences()
         {
             s_serviceLocalAssembly = null;
@@ -1593,6 +1643,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_InitializeTypeNameMapStart);
                 s_typeResolver.InitializeTypeNameMap();
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_InitializeTypeNameMapEnd);
+            }
+            else if (IsServiceCompile && s_serviceReferencesReloaded)
+            {
+                // References added since the map was built (the service reloaded its inputs).
+                s_serviceReferencesReloaded = false;
+                s_typeResolver.AddReferenceAssemblies(_loadedSystemAssemblies.Concat(_loadedNonSystemAssemblies).Where(a => !ReferenceEquals(a, _localAssembly)));
             }
 
             if (_localAssembly != null)

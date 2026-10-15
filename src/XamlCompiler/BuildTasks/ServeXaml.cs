@@ -16,6 +16,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
     // Keeps a XamlCompilerService warm for a host that can't (or doesn't want to) load the compiler
     // assembly itself, such as native tooling. One JSON request per line on stdin, one JSON response
     // per line on stdout. An empty line or {"Shutdown":true} ends the process.
+    // {"Op":"reload","InputJson":"<new input.json>"} takes new inputs (new references) without losing the warm compiler;
+    // {"Op":"reload"} picks up referenced files rebuilt on disk.
     internal sealed class ServeRequest
     {
         public int Id { get; set; }
@@ -26,6 +28,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
         public string LocalAssemblyImage { get; set; }
         public string LocalAssemblyPath { get; set; }
         public bool Shutdown { get; set; }
+        // "reload": take a new input.json (InputJson) or, without one, pick up referenced files rebuilt on disk.
+        // Anything else (or null): compile.
+        public string Op { get; set; }
+        public string InputJson { get; set; }
     }
 
     internal sealed class ServeDiagnostic
@@ -48,6 +54,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
         // Base64.
         public Dictionary<string, string> GeneratedXbf { get; set; }
         public List<ServeDiagnostic> Diagnostics { get; set; }
+        // Reload responses only.
+        public List<string> Added { get; set; }
+        public List<string> Removed { get; set; }
+        public List<string> Released { get; set; }
+        public bool FullReset { get; set; }
     }
 
     internal static class ServeXaml
@@ -77,6 +88,38 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
                     if (request.Shutdown)
                     {
                         break;
+                    }
+
+                    if (string.Equals(request.Op, "reload", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var reply = new ServeResponse { Id = request.Id, Diagnostics = new List<ServeDiagnostic>() };
+                        try
+                        {
+                            XamlReloadResult reload;
+                            if (request.InputJson != null)
+                            {
+                                using (FileStream stream = File.OpenRead(request.InputJson))
+                                {
+                                    reload = service.ReloadInputs(JsonSerializer.Deserialize<CompilerInputs>(stream));
+                                }
+                            }
+                            else
+                            {
+                                reload = service.RefreshReferences();
+                            }
+                            reply.Success = true;
+                            reply.ElapsedMs = reload.Elapsed.TotalMilliseconds;
+                            reply.Added = reload.Added;
+                            reply.Removed = reload.Removed;
+                            reply.Released = reload.Released;
+                            reply.FullReset = reload.FullReset;
+                        }
+                        catch (Exception e)
+                        {
+                            reply.Diagnostics.Add(new ServeDiagnostic { IsError = true, Code = "WMC9999", Message = e.ToString() });
+                        }
+                        stdout.WriteLine(JsonSerializer.Serialize(reply));
+                        continue;
                     }
 
                     IEnumerable<string> files = request.Files ?? (IEnumerable<string>)service.AllXamlFiles;

@@ -17,3 +17,19 @@ v2 (hot reload code generation)
     (obj\...\XamlHotReload), whatever outputPath is. Run the service with outputPath = null.
   Host duties after a delta: run MetadataUpdateHandler types (ClearCache/UpdateApplication); before ApplyUpdate, reset
   _contentLoaded and call the old Bindings.StopTracking(). Bindings.Update() after re-init is now generated.
+
+v3 (references reload)
+  + ReloadInputs(CompilerInputs newInputs): a new input.json from a build of the same project (package or project
+    reference added, removed or updated). Unchanged referenced files stay loaded; files rebuilt or deleted on disk and
+    references that are gone are unloaded with every cache that points at them; new ones load on the next compile.
+    A framework or WinUI reference change (mscorlib, System.Runtime, WinRT.Runtime, Microsoft.Windows.SDK.NET,
+    Microsoft.WinUI, Microsoft.UI*, Windows*) releases the whole type universe instead (FullReset; next compile cold).
+    Pages: the new inputs' pages plus pages added since that they don't list yet.
+  + RefreshReferences(): the same inputs; picks up referenced files rebuilt on disk (a class library rebuild).
+  + XamlReloadResult: Added, Removed, Released (full paths), FullReset, Elapsed.
+  * After a reload, the next CompilePass2(..., regenerateTypeInfo: false) reports XamlTypeInfoMayBeStale (new
+    references can bring types and metadata providers).
+  + --serve: {"Op":"reload","InputJson":"<new input.json>"} or {"Op":"reload"} (refresh). The response carries
+    Success, ElapsedMs, Added, Removed, Released, FullReset; errors in Diagnostics.
+  The host still needs a build (restore + reference resolution) to produce the new input.json; the service doesn't
+  resolve packages.

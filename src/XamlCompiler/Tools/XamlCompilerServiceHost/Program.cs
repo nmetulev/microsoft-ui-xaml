@@ -29,6 +29,11 @@ using Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop;
 //       Creates a warm service, then recompiles the given pages N times (pass 1 + pass 2) and
 //       prints per-phase timings.
 //
+//   reload <build input.json> <outputPath> <baseline dir> <reference name> <older copy of that reference | empty>
+//       References change under a warm service: the reference is missing, then added (ReloadInputs), removed again,
+//       then pointed at an older build that is rebuilt in place (RefreshReferences). Every full compile is compared
+//       with <baseline dir> (a build with the real reference).
+//
 //   tombstones <generated dir> <out dir>
 //       Hot reload tombstone self-test on generated C# (.g.cs, .i.g.cs): for every file, the inventory of fields and
 //       nested types must be a no-op on the file itself; then every inventoried member is removed and restored
@@ -57,6 +62,7 @@ internal static class Program
             case "emit": return Emit(args.Skip(1).ToArray());
             case "edit": return EditScenario(args.Skip(1).ToArray());
             case "tombstones": return TombstoneSelfTest(args[1], args[2]);
+            case "reload": return ReloadScenario(args[1], args[2], args[3], args[4], args[5]);
             default:
                 Console.WriteLine($"unknown command {args[0]}");
                 return 1;
@@ -611,6 +617,88 @@ internal static class Program
         Console.WriteLine($"tombstone self-test: {files} files, {entries} inventoried members, {restored} files rebuilt from tombstones, {failures} failures, {w.ElapsedMilliseconds} ms");
         return failures == 0 ? 0 : 1;
     }
+private static int ReloadScenario(string buildInputJson, string outputPath, string baselineDir, string referenceName, string olderCopy)
+    {
+        CompilerInputs full = ReadInputs(buildInputJson);
+        MSBuildItem reference = full.ReferenceAssemblies.Single(r => Path.GetFileNameWithoutExtension(r.ItemSpec).Equals(referenceName, StringComparison.OrdinalIgnoreCase));
+        CompilerInputs Without()
+        {
+            CompilerInputs i = ReadInputs(buildInputJson);
+            i.ReferenceAssemblies = i.ReferenceAssemblies.Where(r => r.ItemSpec != reference.ItemSpec).ToList();
+            return i;
+        }
+        string tempDir = Path.Combine(Path.GetTempPath(), "xcsvc-reload-" + Environment.ProcessId);
+        Directory.CreateDirectory(tempDir);
+        string tempReference = Path.Combine(tempDir, Path.GetFileName(reference.ItemSpec));
+        CompilerInputs AtTemp()
+        {
+            CompilerInputs i = ReadInputs(buildInputJson);
+            MSBuildItem r = i.ReferenceAssemblies.Single(x => x.ItemSpec == reference.ItemSpec);
+            r.ItemSpec = tempReference;
+            r.FullPath = tempReference;
+            return i;
+        }
+
+        string projectDir = Path.GetDirectoryName(full.ProjectPath);
+        string outputFull = Path.GetFullPath(Path.Combine(projectDir, outputPath));
+        using var service = new XamlCompilerService(Without(), outputPath);
+
+        void Compile(string step)
+        {
+            Stopwatch w = Stopwatch.StartNew();
+            XamlCompileResult p1 = service.CompilePass1(service.AllXamlFiles);
+            XamlCompileResult p2 = service.CompilePass2(service.AllXamlFiles, null, regenerateTypeInfo: true);
+            int same = 0, differ = 0, missing = 0;
+            foreach (string file in p1.GeneratedText.Keys.Concat(p2.GeneratedText.Keys).Concat(p2.GeneratedXbf.Keys).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string baseline = Path.Combine(baselineDir, Path.GetRelativePath(outputFull, file));
+                if (!File.Exists(baseline)) { missing++; continue; }
+                if (File.ReadAllBytes(baseline).AsSpan().SequenceEqual(File.ReadAllBytes(file))) { same++; } else { differ++; }
+            }
+            var errors = p1.Diagnostics.Concat(p2.Diagnostics).Where(d => d.IsError).ToList();
+            Console.WriteLine($"  {step}: pass 1 + pass 2 (all pages, type info) {w.ElapsedMilliseconds} ms, ok={p1.Success && p2.Success}, errors={errors.Count}{(errors.Count > 0 ? " (first: " + errors[0].Code + " " + errors[0].Message.Split('\n')[0].Trim() + ")" : "")}; vs baseline: identical={same} differ={differ} missing={missing}");
+        }
+        void Report(string step, XamlReloadResult r)
+        {
+            Console.WriteLine($"{step}: reload {r.Elapsed.TotalMilliseconds:F1} ms, added {r.Added.Count}, removed {r.Removed.Count}, released [{string.Join(", ", r.Released.Select(Path.GetFileName))}], full reset {r.FullReset}");
+        }
+
+        Console.WriteLine($"1. service created without {referenceName} (cold)");
+        Compile("compile");
+        Compile("compile again (warm)");
+        Report($"2. ReloadInputs(with {referenceName})", service.ReloadInputs(ReadInputs(buildInputJson)));
+        Compile("compile");
+        Report($"3. ReloadInputs(without {referenceName})", service.ReloadInputs(Without()));
+        Compile("compile");
+        if (olderCopy == "empty")
+        {
+            // A build of the library that doesn't have the types yet: same assembly name, no types.
+            CSharpCompilation empty = CSharpCompilation.Create(referenceName, new[] { CSharpSyntaxTree.ParseText("") },
+                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) }, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using FileStream s = File.Create(tempReference);
+            empty.Emit(s);
+        }
+        else
+        {
+            File.Copy(olderCopy, tempReference, overwrite: true);
+        }
+        Report($"4. ReloadInputs({referenceName} -> older build at {tempReference})", service.ReloadInputs(AtTemp()));
+        Compile("compile");
+        File.Copy(reference.ItemSpec, tempReference, overwrite: true);
+        File.SetLastWriteTimeUtc(tempReference, DateTime.UtcNow);
+        Report("5. that file rebuilt in place (the real build copied over it), RefreshReferences()", service.RefreshReferences());
+        Compile("compile");
+        Report("6. RefreshReferences() with nothing changed", service.RefreshReferences());
+        Compile("compile");
+        CompilerInputs withoutWinUI = ReadInputs(buildInputJson);
+        withoutWinUI.ReferenceAssemblies = withoutWinUI.ReferenceAssemblies.Where(r => !Path.GetFileName(r.ItemSpec).Equals("Microsoft.WinUI.dll", StringComparison.OrdinalIgnoreCase)).ToList();
+        Report("7. ReloadInputs(without Microsoft.WinUI.dll): a WinUI reference changed", service.ReloadInputs(withoutWinUI));
+        Report("8. ReloadInputs(back to the build's inputs)", service.ReloadInputs(ReadInputs(buildInputJson)));
+        Compile("compile (cold: the universe was released)");
+        try { Directory.Delete(tempDir, true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
+        return 0;
+    }
+
     // Copies what the compiler wrote to disk for this compile (exact bytes, as a build would leave them).
     private static void Save(XamlCompileResult r, string dir, string serviceOutput)
     {

@@ -24,9 +24,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     public sealed class XamlCompilerService : IDisposable
     {
         /// <summary>Bumped on every change a host can observe; see Tools\API-CHANGES.txt.</summary>
-        public const int ApiVersion = 2;
+        public const int ApiVersion = 3;
 
-        private readonly CompilerInputs _pass2Inputs;
+        private CompilerInputs _pass2Inputs;
         // The build's pages, plus pages added since (new files) and minus removed ones.
         private readonly List<MSBuildItem> _xamlPages;
         private readonly string _outputPath;
@@ -96,6 +96,67 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         {
             string fullPath = Path.GetFullPath(Path.Combine(ProjectFolder, xamlFile));
             return _xamlPages.RemoveAll(i => string.Equals(FullPathOf(i), fullPath, StringComparison.OrdinalIgnoreCase)) > 0;
+        }
+
+        /// <summary>
+        /// Takes new inputs from a build of the same project (a fresh input.json, for example after a package or project
+        /// reference was added, removed or updated) without losing the warm compiler. Referenced files that are unchanged
+        /// stay loaded; files that were rebuilt or deleted, and references that are gone, are unloaded, and the next
+        /// compile loads what the new inputs reference. A change to the framework or WinUI references releases
+        /// everything instead (FullReset; the next compile is a cold one). The next pass 2 with regenerateTypeInfo: false
+        /// reports XamlTypeInfoMayBeStale, since new references can bring new types and metadata providers.
+        /// </summary>
+        public XamlReloadResult ReloadInputs(CompilerInputs newInputs)
+        {
+            if (_disposed)
+            {
+                throw new ObjectDisposedException(nameof(XamlCompilerService));
+            }
+            if (newInputs == null)
+            {
+                throw new ArgumentNullException(nameof(newInputs));
+            }
+            if (!string.Equals(Path.GetFullPath(newInputs.ProjectPath), Path.GetFullPath(_pass2Inputs.ProjectPath), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("The new inputs are for a different project; create a new service.", nameof(newInputs));
+            }
+
+            Stopwatch clock = Stopwatch.StartNew();
+            HashSet<string> oldReferences = ReferencePaths(_pass2Inputs);
+            HashSet<string> newReferences = ReferencePaths(newInputs);
+            var result = new XamlReloadResult();
+            result.Added.AddRange(newReferences.Where(r => !oldReferences.Contains(r)).OrderBy(r => r, StringComparer.OrdinalIgnoreCase));
+            result.Removed.AddRange(oldReferences.Where(r => !newReferences.Contains(r)).OrderBy(r => r, StringComparer.OrdinalIgnoreCase));
+            var noLongerReferenced = new HashSet<string>(result.Removed, StringComparer.OrdinalIgnoreCase);
+            result.FullReset = !CompileXamlInternal.ReleaseChangedServiceReferences(noLongerReferenced, result.Released);
+
+            // Pages: the new build's, plus pages added since that it doesn't list yet (and that still exist).
+            var pages = (newInputs.XamlPages ?? new List<MSBuildItem>()).ToList();
+            var known = new HashSet<string>(pages.Select(FullPathOf), StringComparer.OrdinalIgnoreCase);
+            pages.AddRange(_xamlPages.Where(p => !known.Contains(FullPathOf(p)) && File.Exists(FullPathOf(p)) &&
+                !(_pass2Inputs.XamlPages ?? new List<MSBuildItem>()).Any(o => string.Equals(FullPathOf(o), FullPathOf(p), StringComparison.OrdinalIgnoreCase))));
+            _pass2Inputs = newInputs;
+            _xamlPages.Clear();
+            _xamlPages.AddRange(pages);
+            _typeInfoKeys = null;
+            result.Elapsed = clock.Elapsed;
+            return result;
+        }
+
+        /// <summary>
+        /// The same inputs, but picks up referenced files that were rebuilt or deleted on disk (for example a class
+        /// library the project references). See <see cref="ReloadInputs"/>.
+        /// </summary>
+        public XamlReloadResult RefreshReferences()
+        {
+            return ReloadInputs(_pass2Inputs);
+        }
+
+        private HashSet<string> ReferencePaths(CompilerInputs inputs)
+        {
+            return new HashSet<string>(
+                (inputs.ReferenceAssemblies ?? new List<MSBuildItem>()).Select(FullPathOf),
+                StringComparer.OrdinalIgnoreCase);
         }
 
         /// <summary>
@@ -332,6 +393,23 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 _result.Markers.Add(new XamlCompileMarker(marker, info, _clock.Elapsed.TotalMilliseconds));
             }
         }
+    }
+
+    public sealed class XamlReloadResult
+    {
+        /// <summary>References (full paths) in the new inputs that the old ones didn't have.</summary>
+        public List<string> Added { get; } = new List<string>();
+
+        /// <summary>References (full paths) the old inputs had and the new ones don't.</summary>
+        public List<string> Removed { get; } = new List<string>();
+
+        /// <summary>Loaded files that were unloaded: rebuilt or deleted on disk, or no longer referenced.</summary>
+        public List<string> Released { get; } = new List<string>();
+
+        /// <summary>True when a framework or WinUI reference changed and the whole type universe was released.</summary>
+        public bool FullReset { get; internal set; }
+
+        public TimeSpan Elapsed { get; internal set; }
     }
 
     public sealed class XamlCompileResult
