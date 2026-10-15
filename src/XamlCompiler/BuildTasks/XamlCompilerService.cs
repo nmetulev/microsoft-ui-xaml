@@ -23,6 +23,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     /// </summary>
     public sealed class XamlCompilerService : IDisposable
     {
+        /// <summary>Bumped on every change a host can observe; see Tools\API-CHANGES.txt.</summary>
+        public const int ApiVersion = 2;
+
         private readonly CompilerInputs _pass2Inputs;
         // The build's pages, plus pages added since (new files) and minus removed ones.
         private readonly List<MSBuildItem> _xamlPages;

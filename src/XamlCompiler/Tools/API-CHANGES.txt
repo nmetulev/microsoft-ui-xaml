@@ -1,0 +1,19 @@
+XAML compiler service: API changes (XamlCompilerService.ApiVersion)
+
+v1 (1089897cb)
+  XamlCompilerService(CompilerInputs buildInputs, string outputPath = null)
+  AllXamlFiles, CompilePass1(files), CompilePass2(files, byte[] localAssemblyImage, bool regenerateTypeInfo, string localAssemblyPath)
+  XamlCompileResult: Success, Elapsed, GeneratedText, GeneratedXbf, XamlTypeInfoMayBeStale, Diagnostics, Markers
+
+v2 (hot reload code generation)
+  + XamlCompilerService.ApiVersion
+  + AddXamlPage(path), RemoveXamlPage(path). CompilePass1/CompilePass2 add any .xaml file they are given that the build
+    didn't know (a new page).
+  * GeneratedText values are exactly the file on disk (they now end with the final "\r\n").
+  * Hot reload builds (EnableXamlHotReload, the Debug default) generate shaped code: C# pass 1 file is <Page>.i.g.cs
+    (not .g.i.cs), tombstones, MetadataUpdateHandler on XamlTypeInfoProvider, InitializeComponent re-init. The service
+    takes EnableXamlHotReload from input.json, so it matches the build. Hosts: don't hardcode ".g.i.cs".
+  * Hot reload state (connection ID ledger, member inventories) lives in the build's output folder
+    (obj\...\XamlHotReload), whatever outputPath is. Run the service with outputPath = null.
+  Host duties after a delta: run MetadataUpdateHandler types (ClearCache/UpdateApplication); before ApplyUpdate, reset
+  _contentLoaded and call the old Bindings.StopTracking(). Bindings.Update() after re-init is now generated.
