@@ -18,6 +18,59 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             return ProjectInfo.IsHotReloadBuild && type.UnderlyingType != null ? type.UnderlyingType.FullName : type.ToString();
         }
 
+        // C++/WinRT hot reload builds (EnableXamlHotReload): a host applies a page's new markup live only when the generated C++
+        // is byte-identical to the running build's. Connection IDs are stable there, so declarations whose order means nothing
+        // (switch cases, members, method definitions) follow connection ID or step name instead of document order, and comments
+        // don't carry line numbers: moving, wrapping or reordering elements then leaves the C++ unchanged. Statement order
+        // inside a method (which binding updates first) stays in document order, as in every other build.
+        protected bool IsCppHotReloadCodeGen
+        {
+            get { return ProjectInfo != null && ProjectInfo.IsCppHotReloadCodeGen; }
+        }
+
+        protected IEnumerable<ConnectionIdElement> InIdOrder(IEnumerable<ConnectionIdElement> elements)
+        {
+            return IsCppHotReloadCodeGen ? elements.OrderBy(e => e.ConnectionId).ToList() : elements;
+        }
+
+        protected IEnumerable<BindUniverse> InIdOrder(IEnumerable<BindUniverse> bindUniverses)
+        {
+            return IsCppHotReloadCodeGen ? bindUniverses.OrderBy(bu => bu.RootElement.ConnectionId).ToList() : bindUniverses;
+        }
+
+        protected IEnumerable<BindPathStep> InDeclarationOrder(IEnumerable<BindPathStep> steps)
+        {
+            return IsCppHotReloadCodeGen ? steps.OrderBy(s => s.CodeName, StringComparer.Ordinal).ToList() : steps;
+        }
+
+        protected IEnumerable<IGrouping<string, TItem>> InKeyOrder<TItem>(IEnumerable<IGrouping<string, TItem>> groups)
+        {
+            return IsCppHotReloadCodeGen ? groups.OrderBy(g => g.Key, StringComparer.Ordinal).ToList() : groups;
+        }
+
+        // Pass 1 (the .g.h) has no stable connection IDs yet: its declarations follow their names.
+        protected IEnumerable<FieldDefinition> InNameOrder(IEnumerable<FieldDefinition> fields)
+        {
+            return IsCppHotReloadCodeGen ? fields.OrderBy(f => f.FieldName, StringComparer.Ordinal).ToList() : fields;
+        }
+
+        protected IEnumerable<BindUniverse> InNameOrder(IEnumerable<BindUniverse> bindUniverses)
+        {
+            return IsCppHotReloadCodeGen ? bindUniverses.OrderBy(bu => bu.BindingsClassName, StringComparer.Ordinal).ToList() : bindUniverses;
+        }
+
+        // The comment next to generated code for an element: its file and line, or in C++ hot reload builds its file and
+        // name (or type), which don't change when lines are inserted above it.
+        protected string SourceComment(ConnectionIdElement element)
+        {
+            if (!IsCppHotReloadCodeGen)
+            {
+                return element.LineNumberAndXamlFile;
+            }
+            return element.ParentFileCodeInfo.ApparentRelativePath + " " +
+                (String.IsNullOrEmpty(element.ElementName) ? element.Type.Name : element.ElementName);
+        }
+
         public override string ToStringWithCulture(ICodeGenOutput codegenOutput)
         {
             return codegenOutput.CppWinRTName();

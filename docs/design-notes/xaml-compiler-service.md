@@ -159,9 +159,10 @@ C++/WinRT (no general native hot reload):
 
 1. `CompilePass1([page])` and `CompilePass2([page], winmd, false)`, the same as for C#. The local
    assembly is the project's merged `.winmd` (midl output).
-2. Compare the generated `.g.h`/`.g.hpp` with the previous compile. If they're unchanged (markup-only
-   edits: property values, text, unnamed elements), apply the `.xbf` live. If they changed (`x:Name`,
-   events, `x:Bind`), the C++ code must be rebuilt, so report "restart".
+2. Compare the generated `.g.h`/`.g.hpp` with the running build's. If they're unchanged, apply the `.xbf` live. In
+   hot reload builds that covers property values, text, unnamed elements, and moving, wrapping or reordering
+   elements, named or bound ([section 6](#6-cwinrt)). If they changed (a new `x:Name`, event or `x:Bind`, a changed
+   binding), the C++ code must be rebuilt, so report "restart".
 
 ## Correctness
 
@@ -267,8 +268,8 @@ to `$(EnableXamlHotReload)`. The service passes the build's value through, so a 
 service compile generate the same shape.
 
 - Stable connection IDs (Prototype A) apply to every language: C++ also stops renumbering when an element is inserted.
-- The code generation changes below are C# only (`IsHotReloadCodeGen`). For C++, the one change is a deterministic
-  lookup in the C++/WinRT `static_assert` list (see [Other changes](#other-changes)).
+- Sections 2 to 5 below are C# only (`IsHotReloadCodeGen`). C++/WinRT gets its own changes (`IsCppHotReloadCodeGen`,
+  [section 6](#6-cwinrt)) and a deterministic lookup in its `static_assert` list (see [Other changes](#other-changes)).
 
 ### 1. Stable, append-only connection IDs and tombstones
 
@@ -276,7 +277,11 @@ service compile generate the same shape.
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.
 
-- **Indexed structural keys** for unnamed elements that aren't unique among their siblings (see the risks section).
+- **Bound-signature keys** for unnamed elements that bind or handle events (the ones that get connection IDs): their
+  namescope, type, and canonical `x:Bind` and handler text, plus their order among identical elements in the namescope.
+  Inserting other elements, or wrapping or moving the element, keeps its ID; editing its binding gives it a new one.
+- **Indexed structural keys** for other unnamed elements that aren't unique among their siblings (see the risks
+  section).
 - **Deterministic transient IDs.** An element without a stable key (no `x:Name`, `x:Uid` or `x:Key`, and not unique
   by structure) used to get a new ID on every compile, so recompiling the same markup changed the output.
   - Each such element now has a fingerprint: scope, type and collision key.
@@ -378,6 +383,37 @@ does the rest:
 
 The host must still call the old `StopTracking` before it applies the update. After the delta, the old object's
 methods are the new code running against old fields.
+
+### 6. C++/WinRT
+
+A C++ app can't take new code while it runs. A host applies a page's new markup live only when the generated C++ is
+byte-identical to the running build's, so in C++/WinRT hot reload builds (`IsCppHotReloadCodeGen`) that text depends on
+what the markup means, not on where elements sit in the file:
+
+- **Declarations in connection ID order.** Switch cases (`Connect`, `GetBindingConnector`, `DisconnectUnloadedObject`,
+  the Bindings classes' `Connect` and `UpdateUnloadedElement`), Bindings struct definitions and their element fields
+  follow connection IDs; `Update_`, `UpdateFallback_`, `Invoke_` and `TryGet_` methods and setter helpers follow their
+  names. The `.g.h` (pass 1, before stable IDs exist) orders fields, accessors and Bindings forward declarations by
+  name. Statement order inside a method (which binding updates first) stays in document order, as in every other
+  build: reordering it could change behavior, for example `ItemsSource` before `SelectedItem`.
+- **No source line numbers.** `// MainPage.xaml line 14` becomes `// MainPage.xaml CountText` (the element's name, or
+  its type).
+- **Re-initializing in place.** The host loads new markup into a live instance with `Application::LoadComponent`,
+  which calls `GetBindingConnector` for the root again. The root case now stops the previous `Bindings`
+  (`StopTracking()`), revokes its `Loading` (or `Activated`) subscription (that delegate holds a raw pointer to the
+  object, which is released when replaced), and stores the new token in `_hotReloadBindingsStartToken` (`.g.h`). If
+  the root (a Window: its content) is already loaded, it queues `Initialize()` on the element's `DispatcherQueue`,
+  because the elements the bindings target are connected after this call and `Loading` won't fire again. The `.g.h`
+  includes `winrt/Microsoft.UI.Dispatching.h` for that.
+
+Edit matrix on a C++/WinRT app (a page with a named Button with Click, named TextBlocks and an unnamed `x:Bind`
+TextBlock), warm service vs. a Debug build of this compiler:
+
+| Edit | Before | After |
+|---|---|---|
+| unchanged page, unnamed element at top, line inserted, bound element moved or wrapped, everything wrapped in a Grid | `.g.hpp` changed (line comments; the bound element's ID) | identical |
+| named element wrapped in a Border, two named elements swapped | `.g.h`/`.g.hpp` changed (order) | identical |
+| binding mode changed, named element added | changed | changed (real code changes) |
 
 ### Other changes
 

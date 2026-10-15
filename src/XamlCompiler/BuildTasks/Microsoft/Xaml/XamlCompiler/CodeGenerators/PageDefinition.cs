@@ -295,6 +295,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
                     }
                 }
 
+                // C++/WinRT hot reload builds: GetBindingConnector starts the new bindings of a live instance on its DispatcherQueue.
+                if (ProjectInfo.IsCppHotReloadCodeGen && CodeInfo.BindStatus != BindStatus.None)
+                {
+                    neededCppWinRTProjectionHeaderFiles.Add("winrt/Microsoft.UI.Dispatching.h");
+                }
+
                 // Sort the projection headers by namespace
                 _neededCppWinRTProjectionHeaderFiles = neededCppWinRTProjectionHeaderFiles.OrderBy(
                     value => 
