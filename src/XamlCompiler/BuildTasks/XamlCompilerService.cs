@@ -24,6 +24,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     public sealed class XamlCompilerService : IDisposable
     {
         private readonly CompilerInputs _pass2Inputs;
+        // The build's pages, plus pages added since (new files) and minus removed ones.
+        private readonly List<MSBuildItem> _xamlPages;
         private readonly string _outputPath;
         // Hot reload state (connection ID ledger, retired members) stays with the build's output, so the next build
         // continues the same history as the running app.
@@ -41,6 +43,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public XamlCompilerService(CompilerInputs buildInputs, string outputPath = null)
         {
             _pass2Inputs = buildInputs ?? throw new ArgumentNullException(nameof(buildInputs));
+            _xamlPages = (buildInputs.XamlPages ?? new List<MSBuildItem>()).ToList();
             ProjectFolder = Path.GetDirectoryName(buildInputs.ProjectPath);
             _outputPath = outputPath ?? buildInputs.OutputPath;
             _buildOutputFolder = Path.GetFullPath(Path.IsPathRooted(buildInputs.OutputPath) ? buildInputs.OutputPath : Path.Combine(ProjectFolder, buildInputs.OutputPath));
@@ -55,9 +58,42 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         /// <summary>All XAML files in the project, as full paths.</summary>
         public IReadOnlyList<string> AllXamlFiles =>
             (_pass2Inputs.XamlApplications ?? new List<MSBuildItem>())
-                .Concat(_pass2Inputs.XamlPages ?? new List<MSBuildItem>())
+                .Concat(_xamlPages)
                 .Select(i => FullPathOf(i))
                 .ToList();
+
+        /// <summary>
+        /// Adds a XAML file that the build didn't compile (a new page) as a Page item, as a build would pick it up.
+        /// Compiles call this for any .xaml file they're given that isn't part of the project yet.
+        /// Returns false when the file is already part of the project.
+        /// </summary>
+        public bool AddXamlPage(string xamlFile)
+        {
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectFolder, xamlFile));
+            if (AllXamlFiles.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+            string relative = Utilities.FileHelpers.GetRelativePath(ProjectFolder, fullPath);
+            _xamlPages.Add(new MSBuildItem
+            {
+                ItemSpec = relative,
+                FullPath = fullPath,
+                DependentUpon = String.Empty,
+                MSBuild_Link = String.Empty,
+                MSBuild_TargetPath = String.Empty,
+                MSBuild_XamlResourceMapName = String.Empty,
+                MSBuild_XamlComponentResourceLocation = String.Empty,
+            });
+            return true;
+        }
+
+        /// <summary>Removes a page (for example a deleted file). Its generated files are left in place.</summary>
+        public bool RemoveXamlPage(string xamlFile)
+        {
+            string fullPath = Path.GetFullPath(Path.Combine(ProjectFolder, xamlFile));
+            return _xamlPages.RemoveAll(i => string.Equals(FullPathOf(i), fullPath, StringComparison.OrdinalIgnoreCase)) > 0;
+        }
 
         /// <summary>
         /// Pass 1: generates the .g.i.cs (C#) or .g.h (C++) parts that the project's own code compiles against.
@@ -94,6 +130,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             if (_disposed)
             {
                 throw new ObjectDisposedException(nameof(XamlCompilerService));
+            }
+
+            xamlFiles = xamlFiles.ToList();
+            foreach (string file in xamlFiles)
+            {
+                if (file.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.Combine(ProjectFolder, file)))
+                {
+                    AddXamlPage(file);
+                }
             }
 
             var result = new XamlCompileResult();
@@ -192,7 +237,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 ClIncludeFiles = i.ClIncludeFiles,
                 CIncludeDirectories = i.CIncludeDirectories,
                 XamlApplications = i.XamlApplications,
-                XamlPages = i.XamlPages,
+                XamlPages = _xamlPages.ToList(),
                 LocalAssembly = isPass1 ? null : localAssembly,
                 SdkXamlPages = isPass1 ? null : i.SdkXamlPages,
                 ProjectName = i.ProjectName,

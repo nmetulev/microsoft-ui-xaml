@@ -548,7 +548,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         {
             if (templateConnectionIdElement.BindUniverse.RootElement != templateConnectionIdElement)
             {
-                BindUniverse newRootUniverse = new BindUniverse(templateConnectionIdElement, dataRootType, false, classCodeInfo.ClassName.ShortName);
+                BindUniverse newRootUniverse = new BindUniverse(templateConnectionIdElement, dataRootType, false, classCodeInfo.ClassName.ShortName, classCodeInfo.IsHotReloadCodeGen);
                 templateConnectionIdElement.BindUniverse = newRootUniverse;
             }
         }
