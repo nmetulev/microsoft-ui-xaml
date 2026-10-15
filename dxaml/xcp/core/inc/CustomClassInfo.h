@@ -46,6 +46,20 @@ public:
         m_isUnresolvedPlaceholder = true;
     }
 
+    // Non-zero when this type was supplied by a provider registered after startup
+    // (XamlMetadataProviderRegistry.Register): the registry claim that records which providers supply it. When its
+    // last provider is unregistered, MetadataAPI forgets the names that map to this entry. The entry itself stays,
+    // because live objects and KnownTypeIndex values refer to it.
+    std::uint64_t GetSideProviderClaim() const
+    {
+        return m_sideProviderClaim;
+    }
+
+    void SetSideProviderClaim(std::uint64_t claim)
+    {
+        m_sideProviderClaim = claim;
+    }
+
     void UpdateContentPropertyIndex(KnownPropertyIndex index)
     {
         m_nContentPropertyIndex = index;
@@ -71,4 +85,5 @@ private:
     KnownNamespaceIndex                                     m_nNamespaceIndex;
     bool                                                    m_isBindable{};
     bool                                                    m_isUnresolvedPlaceholder{};
+    std::uint64_t                                           m_sideProviderClaim{};
 };

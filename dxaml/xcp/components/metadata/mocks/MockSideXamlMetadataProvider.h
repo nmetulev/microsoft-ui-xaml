@@ -9,8 +9,8 @@
 namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
     namespace Metadata {
 
-        // A stand-in for the IXamlMetadataProvider a hot reload host would hand to
-        // MetadataAPI::RegisterSideMetadataProvider.
+        // A stand-in for the IXamlMetadataProvider a plugin host (XamlMetadataProviderRegistry.Register) or a hot
+        // reload tool would hand to MetadataAPI::RegisterSideMetadataProvider.
         //
         // Unlike MockXamlMetadataProvider this deliberately does NOT install itself as
         // DynamicMetadataStorage::m_metadataProvider: a side provider is an *additional* provider and
@@ -34,6 +34,26 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
                 return this;
             }
 
+            // A non-WinRT (.NET) type: found by full name in markup, but its identity is its assembly-qualified name.
+            // Two libraries that both define fullName give two different assemblyQualifiedNames.
+            Microsoft::WRL::ComPtr<MockSideXamlMetadataProvider> WithCustomType(_In_ PCWSTR fullName, _In_ PCWSTR assemblyQualifiedName)
+            {
+                Entry entry;
+                entry.Name.Set(fullName);
+                entry.AssemblyQualifiedName.Set(assemblyQualifiedName);
+
+                wrl_wrappers::HString typeFullName;
+                typeFullName.Set(fullName);
+                TypeNamePtr underlyingType(entry.AssemblyQualifiedName.Get(), wxaml_interop::TypeKind_Custom);
+                entry.Type = MockXamlType::Create()
+                    ->WithFullName(std::move(typeFullName))
+                    ->WithUnderlyingType(underlyingType)
+                    ->WithBaseType(KnownTypeIndex::Object);
+
+                m_entries.push_back(std::move(entry));
+                return this;
+            }
+
             Microsoft::WRL::ComPtr<xaml_markup::IXamlType> GetTypeNoRef(_In_ PCWSTR fullName) const
             {
                 wrl_wrappers::HStringReference nameRef(fullName);
@@ -49,6 +69,18 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
 
             IFACEMETHODIMP GetXamlType(_In_ wxaml_interop::TypeName type, _Out_ xaml_markup::IXamlType** ppXamlType)
             {
+                if (type.Kind == wxaml_interop::TypeKind_Custom)
+                {
+                    *ppXamlType = nullptr;
+                    for (const auto& entry : m_entries)
+                    {
+                        if (entry.AssemblyQualifiedName.Get() != nullptr && AreSameString(entry.AssemblyQualifiedName.Get(), type.Name))
+                        {
+                            return entry.Type.CopyTo(ppXamlType);
+                        }
+                    }
+                    return S_OK;
+                }
                 return GetXamlTypeByFullName(type.Name, ppXamlType);
             }
 
@@ -102,6 +134,7 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
             struct Entry
             {
                 wrl_wrappers::HString Name;
+                wrl_wrappers::HString AssemblyQualifiedName;
                 Microsoft::WRL::ComPtr<xaml_markup::IXamlType> Type;
             };
 

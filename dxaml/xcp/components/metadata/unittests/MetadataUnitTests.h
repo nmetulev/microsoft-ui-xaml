@@ -62,38 +62,50 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
 
             TEST_METHOD(TestPropertyGetters)
 
-            #pragma region Side IXamlMetadataProvider registry (experimental)
+            #pragma region Registered IXamlMetadataProviders (XamlMetadataProviderRegistry)
 
             BEGIN_TEST_METHOD(SideProvider_UnknownTypeIsCachedAsUnresolvedMiss)
                 TEST_METHOD_PROPERTY(L"Description", L"A name no provider describes is cached as an unresolved placeholder, which is the miss a later registration has to defeat.")
             END_TEST_METHOD()
 
-            BEGIN_TEST_METHOD(SideProvider_ResolvesNameThatPreviouslyMissed)
-                TEST_METHOD_PROPERTY(L"Description", L"Registering a side provider plus invalidating the cached miss makes a previously unresolvable name resolve. Also proves registration alone is NOT enough.")
+            BEGIN_TEST_METHOD(SideProvider_RegistrationForgetsCachedMisses)
+                TEST_METHOD_PROPERTY(L"Description", L"Registering a provider makes a previously unresolvable name resolve, with no separate invalidation, and tells the parser caches to refresh.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_ResolvesByTypeName)
-                TEST_METHOD_PROPERTY(L"Description", L"GetClassInfoByTypeName resolves through a side provider, not just the by-full-name path.")
+                TEST_METHOD_PROPERTY(L"Description", L"GetClassInfoByTypeName resolves through a registered provider, for WinRT types and for assembly-qualified .NET types.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_DoesNotDisturbTypesTheAppProviderOwns)
-                TEST_METHOD_PROPERTY(L"Description", L"A type the application provider already resolves keeps the exact same CClassInfo and IXamlType identity across registration and invalidation.")
+                TEST_METHOD_PROPERTY(L"Description", L"Types the application provider resolves keep their CClassInfo and IXamlType identity across registration and unregistration.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_RegistrationIsIdempotent)
-                TEST_METHOD_PROPERTY(L"Description", L"Registering the same provider instance twice reports AlreadyRegistered, reuses the id, and does not bump the generation.")
+                TEST_METHOD_PROPERTY(L"Description", L"Registering the same provider twice reports AlreadyRegistered, reuses the id, and does not bump the generation.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_ConflictingProviderIsRejected)
-                TEST_METHOD_PROPERTY(L"Description", L"A second provider that answers for a name an existing side provider already owns is rejected with Conflict and is not registered.")
+                TEST_METHOD_PROPERTY(L"Description", L"A provider that describes a name already in use as a different type is rejected with Conflict, naming the type.")
+            END_TEST_METHOD()
+
+            BEGIN_TEST_METHOD(SideProvider_SharedTypeSurvivesUntilLastProviderLeaves)
+                TEST_METHOD_PROPERTY(L"Description", L"Two providers describing the same type share it, and it stays resolvable until the last of them is unregistered.")
+            END_TEST_METHOD()
+
+            BEGIN_TEST_METHOD(SideProvider_AmbiguousNameResolvesToNothing)
+                TEST_METHOD_PROPERTY(L"Description", L"Registered providers that disagree about an unused name make it resolve to nothing; unregistering one settles it.")
+            END_TEST_METHOD()
+
+            BEGIN_TEST_METHOD(SideProvider_UnregisterForgetsOnlyItsTypes)
+                TEST_METHOD_PROPERTY(L"Description", L"Unregistering forgets only the names that provider alone supplied; old type entries stay valid for live objects.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_RegistryOwnsProviderLifetime)
-                TEST_METHOD_PROPERTY(L"Description", L"The registry keeps the provider alive after the caller drops its reference, and releases it on unregistration.")
+                TEST_METHOD_PROPERTY(L"Description", L"The registry keeps the provider alive while registered and releases it on unregistration.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_GenerationIsObservable)
-                TEST_METHOD_PROPERTY(L"Description", L"Every registration, invalidation and unregistration bumps the monotonic generation, so a stale cache cannot hide a registration.")
+                TEST_METHOD_PROPERTY(L"Description", L"Every registration, invalidation and unregistration bumps the monotonic generation.")
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_InvalidationKeepsResolvedTypes)
@@ -101,11 +113,11 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
             END_TEST_METHOD()
 
             BEGIN_TEST_METHOD(SideProvider_LockContractIsExplicit)
-                TEST_METHOD_PROPERTY(L"Description", L"Registry state is mutated under CStaticLock and the conflict probe runs without it; the lookup path inherits the pre-existing behaviour of invoking providers with the lock held.")
+                TEST_METHOD_PROPERTY(L"Description", L"Registry state is mutated under CStaticLock and the conflict probe runs without it; the lookup path invokes providers with the lock held, as before.")
             END_TEST_METHOD()
 
-            BEGIN_TEST_METHOD(SideProvider_RefusesNullAndUnknownId)
-                TEST_METHOD_PROPERTY(L"Description", L"The result model is truthful for the failure cases: a null provider and an unknown provider id are Refused with a reason.")
+            BEGIN_TEST_METHOD(SideProvider_RefusesNullAndUnknownProvider)
+                TEST_METHOD_PROPERTY(L"Description", L"A null provider and a provider that is not registered are Refused with a reason.")
             END_TEST_METHOD()
 
             #pragma endregion

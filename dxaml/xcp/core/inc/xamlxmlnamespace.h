@@ -96,7 +96,10 @@ protected:
     // (e.g.: Foo/FooExtension for MarkupExtension).
     containers::vector_set<xstring_ptr> m_mapKnownNotFoundTypes;
 
-    // The hot reload type generation m_mapKnownNotFoundTypes was recorded under (see XamlHotReloadOverrides.h).
+    // The XamlTypeCacheGenerations values these maps were filled under. A change of g_typesAdded drops
+    // m_mapKnownNotFoundTypes; a change of g_typesRemoved (a metadata provider was unregistered) also drops
+    // m_mapNameToXamlType.
     std::uint32_t m_knownNotFoundTypeGeneration = 0;
+    std::uint32_t m_resolvedTypeGeneration = 0;
 };
 
