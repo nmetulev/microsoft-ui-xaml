@@ -50,7 +50,7 @@ namespace winrt::<#=Colonize(Model.CodeInfo.ClassName.Namespace)#>::implementati
         virtual <#=Projection(KnownNamespaces.XamlMarkup)#>::IComponentConnector GetBindingConnector(int32_t connectionId, IInspectable const& target);
         void UnloadObject(<#=Projection(KnownNamespaces.Xaml)#>::DependencyObject const& dependencyObject);
         void DisconnectUnloadedObject(int32_t connectionId);
-<#  foreach (var fieldData in Model.CodeInfo.FieldDeclarations) {
+<#  foreach (var fieldData in InNameOrder(Model.CodeInfo.FieldDeclarations)) {
         if (fieldData.IsDeprecated) { #>
 #pragma warning(push)
 #pragma warning(disable : 4973)
@@ -77,11 +77,14 @@ namespace winrt::<#=Colonize(Model.CodeInfo.ClassName.Namespace)#>::implementati
         bool _contentLoaded{false};
 
     private:
-<#  foreach (BindUniverse bindUniverse in Model.CodeInfo.BindUniverses) { #>
+<#  foreach (BindUniverse bindUniverse in InNameOrder(Model.CodeInfo.BindUniverses)) { #>
         struct <#=bindUniverse.BindingsClassName#>;
 <#  }#>
+<#  if (IsCppHotReloadCodeGen && Model.CodeInfo.BindStatus != BindStatus.None) { #>
+        ::winrt::event_token _hotReloadBindingsStartToken{};
+<#  } #>
 
-<#  foreach (var fieldData in Model.CodeInfo.FieldDeclarations) { #>
+<#  foreach (var fieldData in InNameOrder(Model.CodeInfo.FieldDeclarations)) { #>
 <#      if (fieldData.IsDeprecated) { #>
 #pragma warning(push)
 #pragma warning(disable : 4973)

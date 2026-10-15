@@ -94,12 +94,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public void Commit()
         {
-            Commit(removeStaleClasses: true);
+            CommitPublication(removeStaleClasses: true);
         }
 
         // removeStaleClasses: false when only some classes were compiled (the compiler service compiles single pages),
         // so the ledgers of the classes that weren't compiled are kept.
-        public void Commit(bool removeStaleClasses)
+        // Not an overload of Commit: the unit test proxies look methods up by name.
+        public void CommitPublication(bool removeStaleClasses)
         {
             ThrowIfDisposed();
             if (!this.publicationBegun)
@@ -796,6 +797,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private readonly List<HotReloadConnectionIdentity> orderedIdentities =
             new List<HotReloadConnectionIdentity>();
         private readonly string filePath;
+        private readonly Dictionary<string, int> boundSignatureCounts = new Dictionary<string, int>(StringComparer.Ordinal);
 
         internal HotReloadConnectionIdentityMap(string apparentRelativePath, XamlDomObject root)
         {
@@ -842,6 +844,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             string identityKind;
             bool dependsOnParent = false;
             string ambiguityReason = null;
+            string boundSignature = null;
 
             if (parentIdentity == null)
             {
@@ -872,6 +875,21 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     HotReloadConnectionIdText.Part("key", key) + "|" +
                     HotReloadConnectionIdText.Part("type", typeName);
                 identityKind = "x:Key";
+            }
+            else if ((boundSignature = GetBoundSignature(domObject)) != null)
+            {
+                // Unnamed elements that bind or handle events (the ones that get connection IDs): keyed by what they bind
+                // within their namescope, not by where they sit. Inserting other elements, or wrapping or moving this one,
+                // keeps its key; only an identical element earlier in the same namescope shifts the ordinal.
+                string signatureKey = scopeIdentity + "|" +
+                    HotReloadConnectionIdText.Part("type", typeName) + "|" +
+                    HotReloadConnectionIdText.Part("binds", boundSignature);
+                int ordinal;
+                this.boundSignatureCounts.TryGetValue(signatureKey, out ordinal);
+                this.boundSignatureCounts[signatureKey] = ordinal + 1;
+                elementKey = signatureKey + "|" + HotReloadConnectionIdText.Part("index", ordinal.ToString(CultureInfo.InvariantCulture));
+                collisionKey = elementKey;
+                identityKind = "bound-signature";
             }
             else if (parentIdentity.ElementKey != null && IsStructurallyUnique(domObject, typeName))
             {
@@ -988,6 +1006,53 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
             }
             while (changed);
+        }
+
+        // The x:Bind assignments and event handlers on an element, as canonical text in member order; null when it has none.
+        private static string GetBoundSignature(XamlDomObject domObject)
+        {
+            List<string> parts = null;
+            foreach (XamlDomMember member in domObject.MemberNodes)
+            {
+                bool isBind = member.Items.Count == 1 && member.Items[0] is XamlDomObject item && DomHelper.IsBindExtension(item);
+                if (member.Member == null || !(isBind || member.Member.IsEvent))
+                {
+                    continue;
+                }
+                if (parts == null)
+                {
+                    parts = new List<string>();
+                }
+                string memberName = member.Member.IsAttachable && member.Member.DeclaringType != null
+                    ? member.Member.DeclaringType.Name + "." + member.Member.Name
+                    : member.Member.Name;
+                parts.Add(memberName + "=" + String.Join("|", member.Items.Select(CanonicalText)));
+            }
+            if (parts == null)
+            {
+                return null;
+            }
+            parts.Sort(StringComparer.Ordinal);
+            return String.Join(";", parts);
+        }
+
+        private static string CanonicalText(XamlDomItem item)
+        {
+            XamlDomValue value = item as XamlDomValue;
+            if (value != null)
+            {
+                return Convert.ToString(value.Value, CultureInfo.InvariantCulture);
+            }
+            XamlDomObject domObject = item as XamlDomObject;
+            if (domObject == null)
+            {
+                return String.Empty;
+            }
+            IEnumerable<string> members = domObject.MemberNodes
+                .Where(member => member.Member != null)
+                .Select(member => member.Member.Name + "=" + String.Join("|", member.Items.Select(CanonicalText)))
+                .OrderBy(text => text, StringComparer.Ordinal);
+            return domObject.Type.Name + "(" + String.Join(",", members) + ")";
         }
 
         private static bool IsStructurallyUnique(XamlDomObject domObject, string typeName)

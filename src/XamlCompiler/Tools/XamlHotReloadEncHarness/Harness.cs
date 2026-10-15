@@ -35,6 +35,7 @@ internal sealed class Harness
     private readonly List<string> _addedXamlPages = new();
     private readonly List<StepResult> _results = new();
     private readonly HashSet<string> _failedXaml = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _checksumOnlyChanges = new(StringComparer.OrdinalIgnoreCase);
     private bool _verifyBuild;
 
     private AdhocWorkspace? _workspace;
@@ -537,11 +538,45 @@ internal sealed class Harness
 
     private void ApplyGenerated(XamlCompileResult result)
     {
-        foreach (KeyValuePair<string, string> file in result.GeneratedText.Where(f => f.Key.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+        List<KeyValuePair<string, string>> files = result.GeneratedText.Where(f => f.Key.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        // Host rule: when the generated code changed only in its #pragma checksum (the .xaml changed, the code didn't), it
+        // isn't handed to Roslyn. Roslyn commits a no-change update (DebuggingSession, ModuleUpdateStatus.None) as the new
+        // committed solution without a new baseline, and its next update can't find the methods an earlier update added
+        // (NullReferenceException in DefinitionMap.GetPreviousMethodHandle). Otherwise every file is updated, so the
+        // checksums agree (CS1697): files held back earlier (pass 1 and pass 2 are separate compiles) go along.
+        if (files.All(file => DiffersOnlyInChecksums(file.Key, file.Value)))
+        {
+            foreach (KeyValuePair<string, string> file in files)
+            {
+                _checksumOnlyChanges[file.Key] = file.Value;
+            }
+            return;
+        }
+        foreach (KeyValuePair<string, string> file in files)
+        {
+            _checksumOnlyChanges.Remove(file.Key);
+            SetDocument(file.Key, file.Value);
+        }
+        foreach (KeyValuePair<string, string> file in _checksumOnlyChanges)
         {
             SetDocument(file.Key, file.Value);
         }
+        _checksumOnlyChanges.Clear();
     }
+    private bool DiffersOnlyInChecksums(string path, string text)
+    {
+        DocumentId? id = _solution!.GetDocumentIdsWithFilePath(path).FirstOrDefault();
+        if (id == null)
+        {
+            return false;
+        }
+        string current = _solution.GetDocument(id)!.GetTextAsync().GetAwaiter().GetResult().ToString();
+        return WithoutChecksums(current) == WithoutChecksums(text);
+    }
+
+    private static string WithoutChecksums(string text)
+        => string.Join("\n", text.Split('\n').Where(line => !line.StartsWith("#pragma checksum ", StringComparison.Ordinal)));
 
     private void SetDocument(string path, string text)
     {

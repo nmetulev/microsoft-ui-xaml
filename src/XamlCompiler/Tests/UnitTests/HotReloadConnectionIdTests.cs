@@ -123,8 +123,11 @@ namespace UnitTests
                 baseline.NamedIds["FirstButton"]);
         }
 
+        // Identical unnamed siblings (same type, same bindings and handlers) are keyed by their order among identical
+        // elements, so an unchanged file keeps its connection IDs (and its rewritten markup and generated fields) on every
+        // compile. A renumbered x:Bind field is a rude edit for .NET hot reload.
         [TestMethod]
-        public void ExperimentalMode_FailsClosedForIdenticalUnnamedSiblings()
+        public void ExperimentalMode_KeysIdenticalUnnamedSiblingsByPosition()
         {
             string output = CreateTemporaryDirectory();
             string xaml = Page(
@@ -133,10 +136,57 @@ namespace UnitTests
 
             CompilationResult first = CompileExperimental(output, xaml);
             CompilationResult second = CompileExperimental(output, xaml);
+            CompilationResult third = CompileExperimental(output, xaml);
 
-            Assert.AreEqual(first.ConnectionIds.Count, second.ConnectionIds.Count);
-            Assert.AreEqual(2, Regex.Matches(second.Manifest, "\"identityStatus\":\"ambiguous\"").Count);
-            Assert.IsTrue(second.ConnectionIds.Min() > first.ConnectionIds.Max());
+            CollectionAssert.AreEqual(first.ConnectionIds, second.ConnectionIds);
+            CollectionAssert.AreEqual(first.ConnectionIds, third.ConnectionIds);
+            Assert.AreEqual(first.Rewritten, third.Rewritten);
+            Assert.AreEqual(second.Ledger, third.Ledger);
+            Assert.AreEqual(0, GetRetiredIds(third.Ledger).Count);
+            Assert.AreEqual(0, Regex.Matches(third.Manifest, "\"identityStatus\":\"ambiguous\"").Count);
+            Assert.AreEqual(2, Regex.Matches(third.Manifest, "\"identityKind\":\"bound-signature\"").Count);
+        }
+
+        // Unnamed elements that bind or handle events are keyed by what they bind, not where they sit: inserting other
+        // elements above them, wrapping them, or moving them keeps their connection IDs (and their generated code).
+        [TestMethod]
+        public void ExperimentalMode_KeysUnnamedBoundElementsByWhatTheyBind()
+        {
+            string output = CreateTemporaryDirectory();
+            CompilationResult baseline = CompileExperimental(
+                output,
+                Page(
+                    "<Button Content='A' Click='OnA' />",
+                    "<Button Content='B' Click='OnB' />"));
+            CompilationResult edited = CompileExperimental(
+                output,
+                Page(
+                    "<Button Content='Plain' />",
+                    "<Border><Button Content='B' Click='OnB' /></Border>",
+                    "<TextBlock Text='inserted' />",
+                    "<Button Content='A' Click='OnA' />"));
+
+            Dictionary<string, int> before = IdsByContent(baseline.Rewritten);
+            Dictionary<string, int> after = IdsByContent(edited.Rewritten);
+            Assert.AreEqual(before["A"], after["A"]);
+            Assert.AreEqual(before["B"], after["B"]);
+            Assert.AreEqual(0, GetRetiredIds(edited.Ledger).Count);
+            Assert.AreEqual(2, Regex.Matches(edited.Manifest, "\"identityKind\":\"bound-signature\"").Count);
+
+            CompilationResult rebound = CompileExperimental(
+                output,
+                Page(
+                    "<Button Content='A' Click='OnRenamed' />",
+                    "<Button Content='B' Click='OnB' />"));
+            Assert.AreNotEqual(before["A"], IdsByContent(rebound.Rewritten)["A"], "A different handler is a different element.");
+            Assert.AreEqual(before["B"], IdsByContent(rebound.Rewritten)["B"]);
+        }
+
+        private static Dictionary<string, int> IdsByContent(string rewritten)
+        {
+            return Regex.Matches(rewritten, "x:ConnectionId='(?<id>[0-9]+)'[^>]*Content='(?<content>[^']+)'")
+                .Cast<Match>()
+                .ToDictionary(match => match.Groups["content"].Value, match => Int32.Parse(match.Groups["id"].Value));
         }
 
         [TestMethod]
@@ -521,6 +571,7 @@ namespace UnitTests
             public List<int> HarvestOrderIds { get; private set; }
             public string Manifest { get; private set; }
             public string Ledger { get; private set; }
+            public string Rewritten { get; private set; }
 
             public static CompilationResult From(
                 IEnumerable<string> rewrittenFiles,
@@ -545,6 +596,7 @@ namespace UnitTests
                     HarvestOrderIds = harvestOrderIds.ToList(),
                     Manifest = manifest,
                     Ledger = ledger,
+                    Rewritten = rewritten,
                 };
             }
         }

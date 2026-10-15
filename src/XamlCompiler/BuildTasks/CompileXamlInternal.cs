@@ -219,8 +219,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal string ServiceHotReloadStateFolder { get; set; }
         internal string HotReloadStateFolder => ServiceHotReloadStateFolder ?? OutputFolderFullpath;
 
-        // C# only: .NET hot reload applies the generated code; native projects get stable IDs but no other changes.
+        // C# only: .NET hot reload applies the generated code. C++/WinRT: IsCppHotReloadCodeGen.
         internal bool IsHotReloadCodeGen => EnableXamlHotReload && Language != null && Language.Name == ProgrammingLanguage.CSharp;
+
+        // C++/WinRT: the host applies new markup only when the generated C++ is unchanged (no .NET hot reload), so the output
+        // is ordered by connection ID and carries no source line numbers.
+        internal bool IsCppHotReloadCodeGen => EnableXamlHotReload && Language != null && Language.Name == ProgrammingLanguage.CppWinRT;
 
         // Pass 2 only: the types and user-type members collected for XamlTypeInfo, as "Type" and
         // "Type.Member" names. Lets the service tell whether a page edit needs XamlTypeInfo regenerated.
@@ -1239,7 +1243,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         {
                             classCodeInfo.PrepareHotReloadConnectionIdArtifacts();
                         }
-                        _hotReloadConnectionIdLedgerSession.Commit(removeStaleClasses: !IsServiceCompile);
+                        _hotReloadConnectionIdLedgerSession.CommitPublication(removeStaleClasses: !IsServiceCompile);
                         PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_Checkpoint, "hot reload connection ID ledger");
                     }
                 }
@@ -1526,7 +1530,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 return;
             }
             s_typeResolver?.RemoveAssemblyFromTypeNameMap(previous);
-            DirectUI.ReflectionHelper.Release(previous);
+            DirectUI.ReflectionHelper.ReleaseAssembly(previous);
             s_typeUniverse.UnloadAssembly(previous);
         }
 
@@ -1565,7 +1569,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             foreach (var f in stale)
             {
                 s_typeResolver?.RemoveAssemblyFromTypeNameMap(f.Value);
-                DirectUI.ReflectionHelper.Release(f.Value);
+                DirectUI.ReflectionHelper.ReleaseAssembly(f.Value);
                 s_typeUniverse.UnloadAssembly(f.Value);
                 released.Add(f.Key);
             }
@@ -2279,6 +2283,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             projectInfo.ShouldGenerateDisableXBind = this.EnableXBindDiagnostics;
             projectInfo.IsHotReloadCodeGen = this.IsHotReloadCodeGen;
             projectInfo.IsHotReloadBuild = this.EnableXamlHotReload;
+            projectInfo.IsCppHotReloadCodeGen = this.IsCppHotReloadCodeGen;
             projectInfo.EnableTypeInfoReflection = EnableTypeInfoReflection;
             projectInfo.EnableDefaultValidationContextGeneration = EnableDefaultValidationContextGeneration;
 

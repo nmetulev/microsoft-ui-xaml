@@ -569,7 +569,8 @@ namespace UnitTests
             return xamlEditor;
         }
 
-        public List<FileNameAndContentPair> GenerateCodeBehind(CodeGeneratorProjectContext cpx, List<string> xamlStrings, DirectUISchemaContext schema, CodeGenLanguage lang, IList<string> rewrittenXaml = null)
+        // ledger: hot reload stable connection IDs (the caller begins and commits the publication).
+        public List<FileNameAndContentPair> GenerateCodeBehind(CodeGeneratorProjectContext cpx, List<string> xamlStrings, DirectUISchemaContext schema, CodeGenLanguage lang, IList<string> rewrittenXaml = null, HotReloadConnectionIdLedgerSession ledger = null)
         {
             XamlProjectInfo projectInfo = cpx.ProjectInfo;
             XamlClassCodeInfo sharedCodeInfo = null;
@@ -589,12 +590,20 @@ namespace UnitTests
                 if (sharedCodeInfo == null)
                 {
                     sharedCodeInfo = codeInfo;
+                    if (ledger != null)
+                    {
+                        sharedCodeInfo.EnableHotReloadConnectionIds(ledger);
+                    }
                 }
                 else
                 {
                     Assert.AreEqual(sharedCodeInfo.ClassName.FullName, codeInfo.ClassName.FullName);
                 }
 
+                if (ledger != null)
+                {
+                    sharedCodeInfo.BeginHotReloadXamlFile(dummyFileName, domRoot);
+                }
                 XamlFileCodeInfo fileInfo = this.HarvestFileCodeInfo(cpx.ProjectPath, cpx.IsPass1, sharedCodeInfo, domRoot);
                 fileInfo.ApparentRelativePath = dummyFileName;
                 fileInfo.FullPathToXamlFile = dummyFilePath;
@@ -602,6 +611,11 @@ namespace UnitTests
                 fileInfo.SourceXamlGivenPath = dummyFilePath;
                 sharedCodeInfo.AddXamlFileInfo(fileInfo);
                 fileInfos.Add(fileInfo);
+            }
+
+            if (ledger != null)
+            {
+                sharedCodeInfo.PrepareHotReloadConnectionIdArtifacts();
             }
 
             if (!cpx.IsPass1)

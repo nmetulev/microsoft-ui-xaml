@@ -88,7 +88,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             this.Write(this.ToStringHelper.ToStringWithCulture(Projection(KnownNamespaces.Xaml)));
             this.Write("::DependencyObject const& dependencyObject);\r\n        void DisconnectUnloadedObje" +
                     "ct(int32_t connectionId);\r\n");
-  foreach (var fieldData in Model.CodeInfo.FieldDeclarations) {
+  foreach (var fieldData in InNameOrder(Model.CodeInfo.FieldDeclarations)) {
         if (fieldData.IsDeprecated) { 
             this.Write("#pragma warning(push)\r\n#pragma warning(disable : 4973)\r\n");
       }
@@ -116,13 +116,16 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             this.Write("::implementation::XamlBindings> Bindings;\r\n");
   } 
             this.Write("\r\n    protected:\r\n        bool _contentLoaded{false};\r\n\r\n    private:\r\n");
-  foreach (BindUniverse bindUniverse in Model.CodeInfo.BindUniverses) { 
+  foreach (BindUniverse bindUniverse in InNameOrder(Model.CodeInfo.BindUniverses)) { 
             this.Write("        struct ");
             this.Write(this.ToStringHelper.ToStringWithCulture(bindUniverse.BindingsClassName));
             this.Write(";\r\n");
   }
+  if (IsCppHotReloadCodeGen && Model.CodeInfo.BindStatus != BindStatus.None) { 
+            this.Write("        ::winrt::event_token _hotReloadBindingsStartToken{};\r\n");
+  } 
             this.Write("\r\n");
-  foreach (var fieldData in Model.CodeInfo.FieldDeclarations) { 
+  foreach (var fieldData in InNameOrder(Model.CodeInfo.FieldDeclarations)) { 
       if (fieldData.IsDeprecated) { 
             this.Write("#pragma warning(push)\r\n#pragma warning(disable : 4973)\r\n");
       }

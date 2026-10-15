@@ -36,9 +36,9 @@ namespace winrt::<#=Colonize(Model.CodeInfo.ClassName.Namespace)#>::implementati
         template<typename T>
         constexpr bool is_type_complete_v<T, std::void_t<decltype(sizeof(T))>> = true;
 
-<#          foreach (var bindUniverse in Model.CodeInfo.BindUniverses) { #>
+<#          foreach (var bindUniverse in InIdOrder(Model.CodeInfo.BindUniverses)) { #>
 <#              var distinctAsignmentsByMember = from ba in bindUniverse.BindAssignments.Where(ba => ba.HasSetValueHelper) group ba by ba.MemberFullName; #>
-<#              foreach (var item in distinctAsignmentsByMember) { #>
+<#              foreach (var item in InKeyOrder(distinctAsignmentsByMember)) { #>
 <#                  Output_StaticAssertTypeIsComplete(item.First().MemberType, Indent.TwoTabs); #>
 <#                  Output_StaticAssertTypeIsComplete(item.First().MemberDeclaringType, Indent.TwoTabs); #>
 <#              } #>
@@ -81,7 +81,7 @@ namespace winrt::<#=Colonize(Model.CodeInfo.ClassName.Namespace)#>::implementati
 <#      Output_EmptyGetBindingConnectorMethod(); #>
 <# } #>
 <#  if (Model.CodeInfo.IsUsingCompiledBinding) { #>
-<#      foreach (BindUniverse bindUniverse in Model.CodeInfo.BindUniverses) { #>
+<#      foreach (BindUniverse bindUniverse in InIdOrder(Model.CodeInfo.BindUniverses)) { #>
 <#          if (bindUniverse.NeedsCppBindingTrackingClass) { #>
 
 <#          IncludeTemplate<CppWinRT_PageBindingTracking>(Model, bindUniverse); #>
@@ -146,7 +146,7 @@ namespace winrt::<#=Colonize(ProjectInfo.RootNamespace)#>::implementation
 <#+         if(Model.ConnectableElements.Any()) { #>
         switch (connectionId)
         {
-<#+             foreach (var element in Model.ConnectableElements) { #>
+<#+             foreach (var element in InIdOrder(Model.ConnectableElements)) { #>
         case <#=element.ConnectionId#>:
             {
 <#+                 Output_ConnectionId_Case(element); #>
@@ -186,8 +186,8 @@ namespace winrt::<#=Colonize(ProjectInfo.RootNamespace)#>::implementation
     {
         if (unloadableObject)
         {
-<#+         foreach (var element in Model.UnloadableFields) { #>
-            // <#=element.LineNumberAndXamlFile#>
+<#+         foreach (var element in InIdOrder(Model.UnloadableFields)) { #>
+            // <#=SourceComment(element)#>
 <#+             Output_ApiInformationCall_Push(element.ApiInformation, Indent.OneTab); #>
             if (unloadableObject == <#=element.ElementName#>())
             {
@@ -204,11 +204,11 @@ namespace winrt::<#=Colonize(ProjectInfo.RootNamespace)#>::implementation
     {
         switch(connectionId)
         {
-<#+         foreach (var element in Model.DeferrableElements)#>
+<#+         foreach (var element in InIdOrder(Model.DeferrableElements))#>
 <#+         {#>
-            case <#=element.ConnectionId#>: // <#=element.LineNumberAndXamlFile#>
+            case <#=element.ConnectionId#>: // <#=SourceComment(element)#>
             {
-<#+             foreach (var childElem in element.Children) #>
+<#+             foreach (var childElem in InIdOrder(element.Children)) #>
 <#+             {#>
 <#+                 if (childElem.HasFieldDefinition) #>
 <#+                 {#>
@@ -286,9 +286,9 @@ namespace winrt::<#=Colonize(ProjectInfo.RootNamespace)#>::implementation
         ::winrt::com_ptr<<#=Projection(ProjectInfo.RootNamespace)#>::implementation::XamlBindings> bindings;
         switch (connectionId)
         {
-<#+     foreach (var element in Model.AllConnectionIdElements) { #>
+<#+     foreach (var element in InIdOrder(Model.AllConnectionIdElements)) { #>
 <#+         if (element.IsBindingRoot) { #>
-            case <#=element.ConnectionId#>: // <#=element.LineNumberAndXamlFile#>
+            case <#=element.ConnectionId#>: // <#=SourceComment(element)#>
                 {
 <#+             Output_PushDeprecated(element.Type.IsDeprecated());#>
 <#+                 if (element.Type.IsDerivedFromControlTemplate()) #>
@@ -308,7 +308,9 @@ namespace winrt::<#=Colonize(ProjectInfo.RootNamespace)#>::implementation
                     objBindings->SetConverterLookupRoot(*this);
 <#+                     }#>
                     bindings = ::winrt::make_self<<#=Projection(ProjectInfo.RootNamespace)#>::implementation::XamlBindings>(std::move(objBindings));
-<#+                     if (element.IsBindingFileRoot) { #>
+<#+                     if (element.IsBindingFileRoot && IsCppHotReloadCodeGen) { #>
+<#=HotReloadRootBindingsStart(element)#>
+<#+                     } else if (element.IsBindingFileRoot) { #>
                     Bindings = bindings;
 <#+                         if (element.Type.IsDerivedFromWindow()) { #>
                     <#=element.ElementCodeName#>.Activated({&*bindings, &<#=Projection(ProjectInfo.RootNamespace)#>::implementation::XamlBindings::Activated});

@@ -66,6 +66,7 @@ namespace XAMLCompiler.BuildTasks.Core {
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_PageBindingTracking.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_PagePass1.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_PagePass2.cs`,
+        f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_PagePass2.HotReload.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_TypeInfoPass1.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_TypeInfoPass1b.cs`,
         f`Microsoft/Xaml/XamlCompiler/CodeGenerators/CppWinRT/CppWinRT_TypeInfoPass1Impl.cs`,
