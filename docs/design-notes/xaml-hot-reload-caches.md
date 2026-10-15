@@ -39,36 +39,44 @@ tools\XamlHotReloadCacheProbe\run.ps1 -PackageSource <folder with Microsoft.Wind
 
 ## Results
 
-The baseline package is the prototype at c7cbf40ee. The fixed package is this branch.
+Baseline: the prototype package at c7cbf40ee. Fixed: this branch's runtime change (01bddb720) built into an integration
+package on top of c7cbf40ee (`C:\hr-shared\winui\int-01bddb720`). Both columns come from the same probe build, with the
+package cache isolated for each.
 
-| Scenario | What it does | Baseline text | Baseline binary | This branch |
-|---|---|---|---|---|
-| merged-new | Replace a merged dictionary's markup, then create `new ResourceDictionary { Source }` (values, ThemeDictionaries) | pass | pass | pass |
-| merged-swap | Replace it in `Application.Resources.MergedDictionaries`, then create a new page, and check a live page | **live implicit style lost** | **live implicit style lost** | see "Implicit styles" |
-| negcache-swap | Look up a missing key, then swap in a dictionary that defines it (the not-found cache) | pass | pass | pass |
-| generic | Replace `Themes/Generic.xaml`, then create a new templated control | pass | pass | pass |
-| page-new | Replace a page's markup, then create a new instance (Page.Resources, DataTemplate, `x:Load`) | pass | pass | pass |
-| page-reinit | Replace a page's markup, then run `InitializeComponent` again on the live instance | **old Page.Resources kept; new keys missing** | **old Page.Resources and template kept** | see "Re-running InitializeComponent" |
-| page-reinit-reset | Same, after the tool sets `Resources = new ResourceDictionary()` (what both agents do today) | **root attribute removed from markup stays** | **same** | open (see below) |
-| page-reinit-broken | Replaced markup fails to load; the live page must keep its resources | pass | **an existing key is lost** | see below |
-| dict-reinit | A `ResourceDictionary` with `x:Class`, `InitializeComponent` run again | **error: duplicate key** | **old value kept** | see below |
-| loose | A `.xaml` file shipped as content (no `.xbf`), loaded by `Source`, replaced, then removed | pass | pass | pass |
-| cycle | Replace a dictionary V2 → V3 → V2 → original → V3 → V2 → V3, checking each step (reader cache, storage) | pass | pass | pass |
-| app-reload | Replace `App.xaml`, then run `Application.LoadComponent` on the app again | **live implicit style lost** | n/a | see "Implicit styles" |
-| frame-cache | A `NavigationCacheMode="Required"` page: navigate away, replace its markup, then go back | **old page** | **old page** | tool's job (see below) |
-| deferral | Count resources created by loading a dictionary | **4 created (clean build: 0)** | pass | not changed (see below) |
-| implicit-code-swap (control) | Swap in a dictionary built in code, with no markup involved | **implicit style lost** | **same** | see "Implicit styles"; with `nodiag`: pass |
-| resetsource-plain (control) | Set `Source` again on the app's merged dictionary, with no hot reload | E_FAIL | E_FAIL | `nodiag`: E_FAIL too (existing behavior) |
-| reinit-no-hotreload (control) | `InitializeComponent` twice, no hot reload | — | — | `nodiag`: unchanged |
-
-Raw output from the baseline runs is in the handoff. The "This branch" column is filled in from the integration package
-run, and lists only what that run verified.
+| Scenario | What it does | Baseline text / binary | Fixed text / binary |
+|---|---|---|---|
+| merged-new | Replace a merged dictionary's markup, then create `new ResourceDictionary { Source }` (values, ThemeDictionaries) | pass / pass | pass / pass |
+| merged-swap | Replace it in `Application.Resources.MergedDictionaries`, then create a new page, and check a live page | **STALE / STALE**: the live element's implicit style is lost (`Tag` becomes null) | pass / pass |
+| negcache-swap | Look up a missing key, then swap in a dictionary that defines it (the not-found cache) | pass / pass | pass / pass |
+| generic | Replace `Themes/Generic.xaml`, then create a new templated control | pass / pass | pass / pass |
+| page-new | Replace a page's markup, then create a new instance (Page.Resources, DataTemplate, `x:Load`) | pass / pass | pass / pass |
+| page-reinit | Replace a page's markup, then run `InitializeComponent` again on the live instance | **STALE / STALE**: old Page.Resources and DataTemplate; new keys missing; root `Tag` stays | **STALE / STALE**: only the root `Tag` stays (open, see below) |
+| page-reinit-reset | Same, after the tool sets `Resources = new ResourceDictionary()` (what both agents do today) | **STALE / STALE**: root `Tag` | **STALE / STALE**: root `Tag` (open) |
+| page-reinit-broken | Replaced markup fails to load; the live page must keep its resources | pass / **STALE**: an existing key is lost | pass / pass |
+| dict-reinit | A `ResourceDictionary` with `x:Class`, `InitializeComponent` run again | **ERROR** (duplicate key) / **STALE** (old value) | pass / pass |
+| loose | A `.xaml` file shipped as content (no `.xbf`), loaded by `Source`, replaced, then removed | pass / pass | pass / pass |
+| cycle | Replace a dictionary V2 → V3 → V2 → original → V3 → V2 → V3, checking each step (reader cache, storage) | pass / pass | pass / pass |
+| app-reload | Replace `App.xaml`, then run `Application.LoadComponent` on the app again (text only; binary is a no-op) | **STALE**: live implicit style lost | pass |
+| implicit-code-swap (control) | Swap in a dictionary built in code, with no markup involved | **STALE / STALE**; `nodiag`: pass | pass / pass; `nodiag`: pass |
+| frame-cache | A `NavigationCacheMode="Required"` page: navigate away, replace its markup, then go back | **STALE / STALE**: old page | same (the tool's job, see below) |
+| deferral | Count resources created by loading the replaced dictionary (clean build: 0) | **STALE**: 4 / pass: 0 | same (not changed, see below) |
+| merged-resetsource, resetsource-plain (control) | Set `Source` again on the app's merged dictionary | ERROR E_FAIL; `nodiag` too | same (existing behavior, see below) |
+| reinit-no-hotreload (control) | `InitializeComponent` twice with no hot reload: no markup replaced, no diagnostics | `nodiag`: loads twice, keeps `page-v1` | unchanged |
 
 ## Inventory
 
-"Refreshed" means the prototype already handles the cache on the per-thread generation counter
-(`XamlHotReloadOverrides::g_markupGeneration` / `g_typeGeneration`). Each UI thread compares the counter on its next
-use, so no thread touches another's caches.
+"Refreshed" means the cache is already refreshed on a process-wide generation counter. Each UI thread compares the
+counter on its next use, so no thread touches another's caches. The counters are:
+
+- `XamlHotReloadOverrides::g_markupGeneration`: bumped when replaced markup changes.
+- `XamlTypeCacheGenerations::g_typesAdded` and `g_typesRemoved` (`core/inc/XamlTypeCacheGenerations.h`): these come
+  from the metadata provider registry (branch `nmetulev-metadata-provider-api`) and replace the prototype's
+  `g_typeGeneration`.
+  - `g_typesAdded` is bumped by `XamlMetadataProviderRegistry.Register`, by `Unregister`, and by the service's
+    `InvalidateTypeCaches`.
+  - `g_typesRemoved` is bumped only by `Unregister`.
+
+  See `docs/api-specs/XamlMetadataProviderRegistry/XamlMetadataProviderRegistry.md`, "Parser caches".
 
 ### Markup loading (parser, XBF, URIs)
 
@@ -78,8 +86,8 @@ use, so no thread touches another's caches.
 | URI → `.xbf` resource | `m_UriToXbfResourceMap` | URI / per core | yes | No. *measured*: cycle, loose |
 | `.xbf` storage across flushes | `m_XbfResourceStorage`, `m_fileToStoredXbfResource` | file path / per core, until shutdown | replaced markup is never stored by file path | No. Built files can't change while the app runs. Replaced `.xbf` is kept until shutdown (see "Memory") |
 | XBFv2 readers | `m_XBFv2ReaderCache` | **buffer address** / until metadata reset | not needed | No. The key is an address, but every buffer stays alive in `m_XbfResourceStorage`, so an address is never reused. *measured*: cycle alternates contents 7 times |
-| Negative type lookups | `XamlXmlNamespace::m_mapKnownNotFoundTypes` | type name / per namespace | yes (`g_typeGeneration`) | No |
-| Positive type and member lookups | `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | resolved types stay | Not for markup edits: markup doesn't change what a type is. A type whose shape changes in place is a .NET hot reload question, out of scope here |
+| Negative type lookups | `XamlXmlNamespace::m_mapKnownNotFoundTypes` | type name / per namespace | yes (`g_typesAdded`) | No |
+| Positive type and member lookups | `XamlXmlNamespace::m_mapNameToXamlType`, `XamlSchemaContext::m_mapFullyQualifiedProperty`; other `XamlSchemaContext` maps, `MetadataAPI` custom type and property caches | name or token / per core or process | The first two, plus node lists and XBF readers, are dropped on `g_typesRemoved` (a provider was unregistered). Other resolved types stay | Not for markup edits: markup doesn't change what a type is. A type whose shape changes in place is a .NET hot reload question, out of scope here |
 | Parse errors | core error service | per core | yes (cleared on the first `LoadComponent` after a change) | No |
 | Resource URI resolution | `ResourceManager::TryGetLocalResource` → `ModernResourceProvider` | URI / per call | the override wins before MRT | No XAML-side cache. MRT's own maps are opaque |
 
@@ -158,15 +166,21 @@ Known limit: entries that code added to the root's own `Resources` before the re
 workaround. A clean build's constructor would add them again.
 
 `CResourceDictionary::Clear` now also resets `m_undeferredKeyCount` together with the deferred table it drops.
-Otherwise a dictionary loaded again subtracts the previous load's count from the new table.
+Otherwise a dictionary loaded again subtracts the previous load's count from the new table. This is not what makes
+setting `Source` again fail with E_FAIL (see below); that still fails with the fix.
 
 ## Not handled (proposals)
 
 - **Root attributes removed from the markup.** Re-running `InitializeComponent` on a live page leaves properties that
-  only the old markup set (for example `Tag` or `Background` on `<Page>`). *Measured*: page-reinit-reset in both modes.
-  A clean build or a re-created page (approach C) doesn't have them. The runtime could record which root properties
-  the parser set in the first `LoadComponent` (stamped apps only) and clear them before a reload. Until then, tools
-  that reload in place should re-create a page whose root element's attributes changed, or report it.
+  only the old markup set (for example `Tag` or `Background` on `<Page>`). *Measured*: page-reinit and
+  page-reinit-reset in both modes, with and without this branch. A clean build or a re-created page (approach C)
+  doesn't have them. Text and compiled markup both set root properties through
+  `ObjectWriterCommonRuntime::SetValue` → `ObjectWriterRuntime::SetValueImpl`, which can compare the instance with
+  `m_spContext->get_RootInstance()`. The runtime could record the root properties a `LoadComponent` sets there, and
+  clear them before replaced markup is loaded again. That needs per-component storage. To keep the cost near zero, the
+  recording would be limited to apps that carry the hot reload stamp, which needs the stamp check moved to startup.
+  This is a design decision for the WinUI team. Until then, tools that reload in place should re-create a page whose
+  root element's attributes changed, or report it.
 - **Text vs compiled resource deferral.** Compiled markup defers every keyed resource, ThemeDictionaries included,
   until it is looked up. Text markup creates them eagerly unless the dictionary has at least 128 nodes and only keyed
   items (`CResourceDictionary::ShouldDeferNodeStream`). *Measured*: deferral, where text creates 4 resources and
@@ -176,8 +190,8 @@ Otherwise a dictionary loaded again subtracts the previous load's count from the
   `resources.pri` (`ModernResourceProvider::m_appResourceManager`), plus the same per-thread refresh. Until then, a
   `.resw` edit needs a restart.
 - **Setting `ResourceDictionary.Source` again on a dictionary in `Application.Resources`** fails with E_FAIL even
-  without hot reload (resetsource-plain, `nodiag`). Tools must replace the dictionary in its collection instead, which
-  works (merged-swap).
+  without hot reload or diagnostics (resetsource-plain, `nodiag`, with and without this branch). Tools must replace
+  the dictionary in its collection instead, which works (merged-swap).
 - **Memory.** Each replaced `.xbf` is kept until shutdown in `m_XbfResourceStorage`. That keeps the XBFv2 reader
   cache's address keys unique and the reader-owned strings valid. The cost is the size of every compiled save. Freeing
   it needs readers that no longer hand out strings pointing into their buffer.
