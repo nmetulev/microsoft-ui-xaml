@@ -59,6 +59,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
         public List<string> Removed { get; set; }
         public List<string> Released { get; set; }
         public bool FullReset { get; set; }
+        public bool KeptLocalAssembly { get; set; }
     }
 
     internal static class ServeXaml
@@ -113,6 +114,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Executable
                             reply.Removed = reload.Removed;
                             reply.Released = reload.Released;
                             reply.FullReset = reload.FullReset;
+                            reply.KeptLocalAssembly = reload.KeptLocalAssembly;
                         }
                         catch (Exception e)
                         {

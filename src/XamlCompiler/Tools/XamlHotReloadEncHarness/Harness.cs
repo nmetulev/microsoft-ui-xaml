@@ -122,6 +122,32 @@ internal sealed class Harness
 
     private async Task<StepResult> RunStepAsync(JourneyStep step)
     {
+        if (step.Op == "reload")
+        {
+            // A reference change (a package added): the build's inputs again, plus the reference named by the step.
+            CompilerInputs inputs = ReadInputs();
+            string reference = step.Text.Trim();
+            if (reference.StartsWith("pass1|", StringComparison.Ordinal))
+            {
+                // What MarkupCompilePass1 writes to the same input.json: pass 1 inputs, no LocalAssembly.
+                reference = reference.Substring("pass1|".Length);
+                inputs.IsPass1 = true;
+                inputs.CompileMode = "DesignTimeBuild";
+                inputs.LocalAssembly = null;
+                inputs.SdkXamlPages = null;
+            }
+            if (!string.IsNullOrWhiteSpace(reference))
+            {
+                inputs.ReferenceAssemblies.Add(new MSBuildItem { ItemSpec = reference, FullPath = reference, DependentUpon = "", MSBuild_Link = "", MSBuild_TargetPath = "", MSBuild_XamlResourceMapName = "", MSBuild_XamlComponentResourceLocation = "" });
+            }
+            XamlReloadResult reload = _service!.ReloadInputs(inputs);
+            return new StepResult(step.Id, step.Title, step.Expect)
+            {
+                Outcome = "reloaded",
+                XamlMs = reload.Elapsed.TotalMilliseconds,
+                Details = $"added {reload.Added.Count}, removed {reload.Removed.Count}, released {reload.Released.Count}, full reset {reload.FullReset}, kept LocalAssembly {reload.KeptLocalAssembly}",
+            };
+        }
         string path = Path.Combine(_projectDir, step.File);
         bool isNew = !File.Exists(path);
         step.Apply(path);
@@ -239,7 +265,9 @@ internal sealed class Harness
         ApplyGenerated(p2);
         if (p2.XamlTypeInfoMayBeStale)
         {
-            XamlCompileResult full = _service.CompilePass2(_service.AllXamlFiles, image, regenerateTypeInfo: true);
+            // Hot reload builds: the page alone with type info regenerated equals a full pass 2 (sorted tables), and the
+            // other pages' type information is replayed from the service's cache.
+            XamlCompileResult full = _service.CompilePass2(new[] { path }, image, regenerateTypeInfo: true);
             result.TypeInfoMs += full.Elapsed.TotalMilliseconds;
             if (!full.Success)
             {
@@ -649,6 +677,10 @@ internal sealed class JourneyStep
 
     public void Apply(string path)
     {
+        if (Op == "reload")
+        {
+            return;
+        }
         if (Op == "create-file")
         {
             System.IO.File.WriteAllText(path, Text + "\r\n", new UTF8Encoding(true));

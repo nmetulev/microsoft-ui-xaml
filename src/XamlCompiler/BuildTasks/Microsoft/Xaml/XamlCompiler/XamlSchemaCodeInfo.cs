@@ -170,7 +170,35 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return false;
         }
 
+        // The compiler service records a page's type information calls here (see PageTypeInfoCache). Only the outermost
+        // call is recorded: the calls it makes itself happen again when it is replayed.
+        internal TypeInfoRecorder Recorder { get; set; }
+        private int _recordDepth;
+
+        private bool BeginCall(TypeInfoOp op, XamlType type, XamlMember member, bool isStub)
+        {
+            if (Recorder != null && _recordDepth == 0)
+            {
+                Recorder.Record(op, type, member, isStub);
+            }
+            _recordDepth++;
+            return true;
+        }
+
         public InternalTypeEntry AddTypeAndProperties(XamlType xamlType)
+        {
+            BeginCall(TypeInfoOp.TypeAndProperties, xamlType, null, false);
+            try
+            {
+                return AddTypeAndPropertiesCore(xamlType);
+            }
+            finally
+            {
+                _recordDepth--;
+            }
+        }
+
+        private InternalTypeEntry AddTypeAndPropertiesCore(XamlType xamlType)
         {
             InternalTypeEntry typeEntry = AddType(xamlType);
             AddAllCodeGenProperties(xamlType);
@@ -179,10 +207,31 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public InternalTypeEntry AddReturnTypeStub(XamlType xamlType)
         {
-            return AddType(xamlType, true);
+            BeginCall(TypeInfoOp.ReturnTypeStub, xamlType, null, true);
+            try
+            {
+                return AddType(xamlType, true);
+            }
+            finally
+            {
+                _recordDepth--;
+            }
         }
 
         public InternalTypeEntry AddType(XamlType xamlType, bool isReturnTypeStub = false)
+        {
+            BeginCall(TypeInfoOp.Type, xamlType, null, isReturnTypeStub);
+            try
+            {
+                return AddTypeCore(xamlType, isReturnTypeStub);
+            }
+            finally
+            {
+                _recordDepth--;
+            }
+        }
+
+        private InternalTypeEntry AddTypeCore(XamlType xamlType, bool isReturnTypeStub)
         {
             if (xamlType == null)
             {
@@ -307,6 +356,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         }
 
         public InternalXamlUserMemberInfo AddMember(InternalTypeEntry usingType, XamlMember xamlMember, bool declaringTypeAsStub = false)
+        {
+            BeginCall(TypeInfoOp.Member, null, xamlMember, declaringTypeAsStub);
+            try
+            {
+                return AddMemberCore(xamlMember, declaringTypeAsStub);
+            }
+            finally
+            {
+                _recordDepth--;
+            }
+        }
+
+        private InternalXamlUserMemberInfo AddMemberCore(XamlMember xamlMember, bool declaringTypeAsStub)
         {
             if (xamlMember.IsDirective)
             {
