@@ -21,5 +21,31 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
                 "                    return;\r\n" +
                 "                }\r\n";
         }
-    }
+
+        // A Bindings object created before an update that gave its scope tracking (its first OneWay or TwoWay binding) has
+        // no tracking object: the field arrives with the update and the constructor doesn't run again. Paths that need
+        // tracking create it on first use; paths that release it skip a missing one.
+        public string BindingsTrackingAccess
+        {
+            get { return IsHotReloadCodeGen ? "this.EnsureBindingsTracking()" : "this.bindingsTracking"; }
+        }
+
+        public string HotReloadEnsureBindingsTracking(BindUniverse bindUniverse)
+        {
+            if (!IsHotReloadCodeGen)
+            {
+                return string.Empty;
+            }
+            string tracking = bindUniverse.BindingsClassName + "Tracking";
+            return
+                "\r\n" +
+                "            private " + tracking + " EnsureBindingsTracking()\r\n" +
+                "            {\r\n" +
+                "                if (this.bindingsTracking == null)\r\n" +
+                "                {\r\n" +
+                "                    this.bindingsTracking = new " + tracking + "(this);\r\n" +
+                "                }\r\n" +
+                "                return this.bindingsTracking;\r\n" +
+                "            }\r\n";
+        }    }
 }

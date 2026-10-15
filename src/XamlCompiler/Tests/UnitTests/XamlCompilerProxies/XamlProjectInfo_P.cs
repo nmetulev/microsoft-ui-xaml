@@ -23,6 +23,7 @@ namespace Win8Xaml.CompilerProxies
         static PropertyInfo _targetPlatformMinVersion;
         static PropertyInfo _codeGenFlagsProperty;
         static PropertyInfo _isHotReloadBuildProperty;
+        static PropertyInfo _isHotReloadCodeGenProperty;
         static PropertyInfo _isCppHotReloadCodeGenProperty;
         static PropertyInfo _usingCSWinRTProperty;
 
@@ -41,6 +42,7 @@ namespace Win8Xaml.CompilerProxies
             _targetPlatformMinVersion = _xamlProjectInfoType.GetProperty("TargetPlatformMinVersion");
             _codeGenFlagsProperty = _xamlProjectInfoType.GetProperty("CodeGenFlags");
             _isHotReloadBuildProperty = _xamlProjectInfoType.GetProperty("IsHotReloadBuild");
+            _isHotReloadCodeGenProperty = _xamlProjectInfoType.GetProperty("IsHotReloadCodeGen");
             _isCppHotReloadCodeGenProperty = _xamlProjectInfoType.GetProperty("IsCppHotReloadCodeGen");
             _usingCSWinRTProperty = _xamlProjectInfoType.GetProperty("UsingCSWinRT");
         }
@@ -106,6 +108,12 @@ namespace Win8Xaml.CompilerProxies
         {
             get { return (bool)_isHotReloadBuildProperty.GetValue(_instance, null); }
             set { _isHotReloadBuildProperty.SetValue(_instance, value); }
+        }
+
+        public bool IsHotReloadCodeGen
+        {
+            get { return (bool)_isHotReloadCodeGenProperty.GetValue(_instance, null); }
+            set { _isHotReloadCodeGenProperty.SetValue(_instance, value); }
         }
 
         public bool IsCppHotReloadCodeGen

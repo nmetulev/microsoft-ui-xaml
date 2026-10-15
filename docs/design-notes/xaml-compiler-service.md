@@ -380,6 +380,11 @@ does the rest:
   current `Bindings`. Otherwise a replaced Bindings object, still subscribed to the root, starts again on the next
   event: a Window raises `Activated` often, and `StopTracking` resets `initialized`.
 - **`StopTracking` is null-safe** (`bindingsTracking?.`).
+- **Tracking may be missing on live objects.** .NET hot reload adds fields without running constructors, so a
+  Bindings object created before the update that gave its scope its first OneWay or TwoWay binding has no
+  `bindingsTracking`. `Recycle` (called when a list recycles containers, also on scroll) and `SetDataRoot` skip it,
+  and the paths that need it (TwoWay listener registration, `UpdateChildListeners_*`) call `EnsureBindingsTracking()`,
+  which creates it.
 
 The host must still call the old `StopTracking` before it applies the update. After the delta, the old object's
 methods are the new code running against old fields.
@@ -540,6 +545,17 @@ on a loaded machine), against 10 to 13.5 s for a cold service. A host still need
    `EditAndContinue/Utilities/Extensions.cs`) excludes it, so a change to a field's type in that file (WinUI's
    `x:Name` fields) applies with no rude edit, and the field keeps its old type at run time. Ask: limit the rule to
    WPF projects, or report changes in such documents as rude edits. WinUI hot reload builds no longer depend on it.
+3. **A no-change update breaks the next update of members an earlier update added** (same NullReferenceException in
+   `DefinitionMap.GetPreviousMethodHandle`). When `GetUpdatesAsync` finds no semantic change
+   (`ModuleUpdateStatus.None`), `DebuggingSession` commits the new solution (`LastCommittedSolution.CommitChanges`)
+   without a new `EmitBaseline`. The next update then maps old symbols from that solution's compilation, while
+   `Baseline.MethodsAdded` is keyed by the compilation that emitted the delta, so a method added during the session
+   isn't found. Harness repro (TodoBench): add a TwoWay `x:Bind` (applies), edit a text property (the `.g.cs` changes
+   only in its `#pragma checksum`: no change), change the binding's `UpdateSourceTrigger`: NRE. Without the middle
+   save, or with the old lambda codegen, it applies, so lambdas aren't the trigger. Hosts can avoid it for generated
+   code: don't hand Roslyn a compile whose generated files changed only in `#pragma checksum` lines (hold them back
+   and send them with the next real change, so one `.xaml`'s checksums stay consistent, CS1697). User edits that
+   change only comments or whitespace still hit it.
 
 ## Open questions and risks
 

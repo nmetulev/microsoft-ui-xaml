@@ -494,7 +494,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+             {#>
 
             private <#=bindUniverse.BindingsClassName#>Tracking bindingsTracking;
-<#+             }#>
+<#=HotReloadEnsureBindingsTracking(bindUniverse)#><#+             }#>
 
             public <#=bindUniverse.BindingsClassName#>()
             {
@@ -601,7 +601,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+                     } #>
 <#+                 }#>
 <#+                 if (element.TwoWayBindAssignments.Any()) { #>
-                        this.bindingsTracking.RegisterTwoWayListener_<#=element.ConnectionId#>(<#=element.ReferenceExpression#>);
+                        <#=BindingsTrackingAccess#>.RegisterTwoWayListener_<#=element.ConnectionId#>(<#=element.ReferenceExpression#>);
 <#+                 }#>
 <#+                 Output_ApiInformationCall_Pop(element.ApiInformation, Indent.ThreeTabs); #>
 <#+                 } #>
@@ -854,7 +854,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
             {
 <#+             if (bindUniverse.NeedsBindingsTracking)#>
 <#+             {#>
-                this.bindingsTracking.ReleaseAllListeners();
+                this.bindingsTracking<#=HotReloadNullConditional#>.ReleaseAllListeners();
 <#+             }#>
 <#+ foreach(KeyValuePair<int, List<PhaseAssignment>> kvp in bindUniverse.PhaseAssignments.Where(kvp => kvp.Key != 0).OrderBy(kvp => kvp.Key)) #>
 <#+ { #>
@@ -995,7 +995,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
             {
 <#+             if (bindUniverse.NeedsBindingsTracking)#>
 <#+             {#>
-                this.bindingsTracking.ReleaseAllListeners();
+                this.bindingsTracking<#=HotReloadNullConditional#>.ReleaseAllListeners();
 <#+             }#>
                 if (newDataRoot != null)
                 {
@@ -1089,7 +1089,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+                 }#>
 <#+                 if (bindStep.RequiresChildNotification && (bindStep is PropertyStep || bindStep is CastStep || bindStep is RootStep || bindStep is RootNamedElementStep || bindStep is ArrayIndexStep || bindStep is MapIndexStep))#>
 <#+                 {#>
-                this.bindingsTracking.UpdateChildListeners_<#=bindStep.CodeName#>(obj);
+                <#=BindingsTrackingAccess#>.UpdateChildListeners_<#=bindStep.CodeName#>(obj);
 <#+                 }#>
 <#+                 Output_Update_Steps(bindStep.ValueType.IsNullable, "this", bindStep.Children, true, "phase");#>
 <#+                 // Dependents are function bindings: a null value is a valid argument, not an unresolved path.#>
