@@ -351,35 +351,57 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
                 }).ToList();
         }
 
+        // The part of a generated method name that tells types (or members) with the same short name apart: the table index,
+        // or in hot reload builds a hash of the full name, so that adding a type doesn't rename the methods of the others
+        // (a rename is a delete for .NET hot reload, and cached delegates would point at deleted methods).
+        private string TypeKey(InternalXamlUserTypeInfo entry)
+        {
+            return ProjectInfo.IsHotReloadCodeGen ? StableKey(entry.SystemName) : entry.TypeIndex.ToString();
+        }
+
+        private string MemberKey(int index, InternalXamlUserMemberInfo entry)
+        {
+            return ProjectInfo.IsHotReloadCodeGen ? StableKey(entry.DeclaringType.SystemName + "." + entry.Name) : index.ToString();
+        }
+
+        private static string StableKey(string name)
+        {
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(System.Text.Encoding.UTF8.GetBytes(name));
+                return "h" + BitConverter.ToString(hash, 0, 4).Replace("-", String.Empty).ToLowerInvariant();
+            }
+        }
+
         public String GetterName(int i)
         {
             InternalXamlUserMemberInfo entry = SchemaInfo.UserMemberInfo[i];
-            String name = "get_" + i.ToString() + "_" + entry.DeclaringType.Name + "_" + entry.Name;
+            String name = "get_" + MemberKey(i, entry) + "_" + entry.DeclaringType.Name + "_" + entry.Name;
             return name;
         }
 
         public String SetterName(int i)
         {
             InternalXamlUserMemberInfo entry = SchemaInfo.UserMemberInfo[i];
-            String name = "set_" + i.ToString() + "_" + entry.DeclaringType.Name + "_" + entry.Name;
+            String name = "set_" + MemberKey(i, entry) + "_" + entry.DeclaringType.Name + "_" + entry.Name;
             return name;
         }
 
         public String ActivatorName(InternalXamlUserTypeInfo entry)
         {
-            return "Activate_" + entry.TypeIndex.ToString() + "_" + entry.Name;
+            return "Activate_" + TypeKey(entry) + "_" + entry.Name;
         }
 
         public String StaticInitializerName(InternalXamlUserTypeInfo entry)
         {
-            return "StaticInitializer_" + entry.TypeIndex.ToString() + "_" + entry.Name;
+            return "StaticInitializer_" + TypeKey(entry) + "_" + entry.Name;
         }
 
         public String VectorAddName(InternalXamlUserTypeInfo entry)
         {
             if (entry.IsCollection)
             {
-                String name = "VectorAdd_" + entry.TypeIndex.ToString() + "_" + entry.Name;
+                String name = "VectorAdd_" + TypeKey(entry) + "_" + entry.Name;
                 return name;
             }
             return String.Empty;
@@ -389,7 +411,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
         {
             if (entry.IsDictionary)
             {
-                String name = "MapAdd_" + entry.TypeIndex.ToString() + "_" + entry.Name;
+                String name = "MapAdd_" + TypeKey(entry) + "_" + entry.Name;
                 return name;
             }
             return String.Empty;
