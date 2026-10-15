@@ -30,6 +30,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             get { return EmitsHotReloadReset ? "            HotReloadResetIfUpdated();\r\n" : string.Empty; }
         }
 
+        // The library providers (OtherProviders) are created on first use. An update that adds a package or project
+        // reference adds one to the generated list, so the live provider has to rebuild it. Not when the list is filled by
+        // AddOtherProvider (DoNotGenerateOtherProviders): those providers come from outside and would be lost.
+        private string ResetOtherProviders
+        {
+            get
+            {
+                return SchemaInfo.OtherMetadataProviders.Count > 0 && ProjectInfo.GenerateProviderCode
+                    ? "                    _otherProviders = null;\r\n"
+                    : string.Empty;
+            }
+        }
+
         public string HotReloadProviderMembers()
         {
             if (!EmitsHotReloadReset)
@@ -62,6 +75,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
                 "                    _xamlMembers.Clear();\r\n" +
                 "                    _typeNameTable = null;\r\n" +
                 "                    _typeTable = null;\r\n" +
+                ResetOtherProviders +
                 "                    _hotReloadGeneration = generation;\r\n" +
                 "                }\r\n" +
                 "            }\r\n" +
