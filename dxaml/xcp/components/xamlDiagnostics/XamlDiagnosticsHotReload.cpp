@@ -85,6 +85,40 @@ IFACEMETHODIMP XamlDiagnostics::RemoveComponentMarkup(_In_opt_z_ LPCWSTR uri)
     return XamlHotReloadOverrides::RemoveMarkup(uri);
 }
 
+IFACEMETHODIMP XamlDiagnostics::ReloadComponents(_In_z_ LPCWSTR uri, _Out_ UINT32* count)
+{
+    if (count == nullptr)
+    {
+        return E_POINTER;
+    }
+    *count = 0;
+    IFC_RETURN(EnsureEnabled());
+    if (uri == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+    return XamlHotReloadOverrides::ReloadComponents(uri, count);
+}
+
+IFACEMETHODIMP XamlDiagnostics::GetLiveComponents(
+    _In_z_ LPCWSTR uri,
+    _Out_ UINT32* count,
+    _Outptr_result_buffer_maybenull_(*count) IInspectable*** components)
+{
+    if (count == nullptr || components == nullptr)
+    {
+        return E_POINTER;
+    }
+    *count = 0;
+    *components = nullptr;
+    IFC_RETURN(EnsureEnabled());
+    if (uri == nullptr)
+    {
+        return E_INVALIDARG;
+    }
+    return XamlHotReloadOverrides::GetLiveComponents(uri, count, components);
+}
+
 IFACEMETHODIMP XamlDiagnostics::AdviseComponentLoaded(
     _In_ IXamlComponentLoadedCallback* callback,
     _Out_ DWORD* cookie)

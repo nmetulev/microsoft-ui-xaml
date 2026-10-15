@@ -1,4 +1,4 @@
-﻿// Copyright (c) Microsoft Corporation. All rights reserved.
+// Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License. See LICENSE in the project root for license information.
 
 #pragma once
@@ -47,7 +47,7 @@ class
         // interfaces that derive from base interfaces. The class only implements the first one, so this
         // should always be the most derived, but will still be able to QI for the other classes in the list.
         wrl::ChainInterfaces<IVisualTreeService3, IVisualTreeService2, IVisualTreeService>,
-        IXamlHotReloadService,
+        wrl::ChainInterfaces<IXamlHotReloadService2, IXamlHotReloadService>,
         IXamlDiagnosticsTestHooks,
         wrl::FtmBase>
 {
@@ -233,7 +233,7 @@ public:
         _Out_ unsigned int* pCount,
         _Deref_post_opt_count_(*pCount) InstanceHandle** ppInstanceHandles) override;
 
-    // IXamlHotReloadService Interface (XamlDiagnosticsHotReload.cpp)
+    // IXamlHotReloadService and IXamlHotReloadService2 Interfaces (XamlDiagnosticsHotReload.cpp)
     IFACEMETHOD(SetComponentMarkup)(
         _In_z_ LPCWSTR uri,
         XamlMarkupKind kind,
@@ -249,6 +249,13 @@ public:
     IFACEMETHOD(RegisterMetadataProvider)(
         _In_ IInspectable* provider) override;
     IFACEMETHOD(InvalidateTypeCaches)() override;
+    IFACEMETHOD(ReloadComponents)(
+        _In_z_ LPCWSTR uri,
+        _Out_ UINT32* count) override;
+    IFACEMETHOD(GetLiveComponents)(
+        _In_z_ LPCWSTR uri,
+        _Out_ UINT32* count,
+        _Outptr_result_buffer_maybenull_(*count) IInspectable*** components) override;
 
     // IXamlDiagnosticsTestHooks Interface
     IFACEMETHOD(UnregisterInstance)(\

@@ -224,6 +224,139 @@ namespace XamlHotReload
     // The file the XAML compiler writes to the app's output (and so its package root) to allow hot reload.
     inline constexpr wchar_t c_stampFileName[] = L"Microsoft.UI.Xaml.HotReload.enabled";
 
+    // Properties (KnownPropertyIndex values) the previous load set on a component's root that the latest load of
+    // replaced markup didn't set: a clean build wouldn't have them, so they are cleared. Order of `previous` is kept.
+    inline std::vector<std::uint16_t> RootPropertiesToClear(
+        const std::vector<std::uint16_t>& previous,
+        const std::vector<std::uint16_t>& latest)
+    {
+        std::vector<std::uint16_t> removed;
+        for (const auto property : previous)
+        {
+            if (std::find(latest.begin(), latest.end(), property) == latest.end() &&
+                std::find(removed.begin(), removed.end(), property) == removed.end())
+            {
+                removed.push_back(property);
+            }
+        }
+        return removed;
+    }
+
+    // Live components by the markup URI they were loaded from (Application.LoadComponent), so the runtime can load them
+    // again (IXamlHotReloadService::ReloadComponents). Entries hold weak references: Weak is resolved only on the
+    // component's own thread (Record's isAlive, and whoever handles a Match), Owner is how to reach that thread.
+    template <typename Weak, typename Owner>
+    class ComponentTable
+    {
+    public:
+        struct Target
+        {
+            std::wstring Uri;            // as passed to LoadComponent
+            Weak Ref;
+            Owner Thread;
+            std::uint32_t ThreadId = 0;
+            std::int32_t Location = 0;   // ComponentResourceLocation
+        };
+
+        // Called on the component's thread after a successful load. isAlive(const Weak&) is only called for entries
+        // owned by threadId. Returns the root properties the previous load of this component recorded (empty the first
+        // time), and keeps rootProperties for the next one. A URI that can't be normalized isn't tracked.
+        template <typename IsAlive>
+        std::vector<std::uint16_t> Record(
+            std::wstring_view uri,
+            const void* identity,
+            std::uint32_t threadId,
+            Weak ref,
+            Owner thread,
+            std::int32_t location,
+            std::vector<std::uint16_t> rootProperties,
+            IsAlive&& isAlive)
+        {
+            std::wstring key;
+            if (NormalizeMarkupUri(uri, key) != nullptr)
+            {
+                return {};
+            }
+
+            std::vector<std::uint16_t> previous;
+            std::lock_guard<std::mutex> guard(m_lock);
+            for (auto it = m_entries.begin(); it != m_entries.end();)
+            {
+                if (it->Key != key || it->Component.ThreadId != threadId)
+                {
+                    ++it;
+                }
+                else if (!isAlive(it->Component.Ref))
+                {
+                    // Gone, or its address now belongs to a new object: a new entry is made below.
+                    it = m_entries.erase(it);
+                }
+                else if (it->Identity == identity)
+                {
+                    previous = std::move(it->RootProperties);
+                    it->RootProperties = std::move(rootProperties);
+                    it->Component.Uri.assign(uri.begin(), uri.end());
+                    it->Component.Location = location;
+                    return previous;
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+
+            Entry entry;
+            entry.Key = std::move(key);
+            entry.Identity = identity;
+            entry.RootProperties = std::move(rootProperties);
+            entry.Component.Uri.assign(uri.begin(), uri.end());
+            entry.Component.Ref = std::move(ref);
+            entry.Component.Thread = std::move(thread);
+            entry.Component.ThreadId = threadId;
+            entry.Component.Location = location;
+            m_entries.push_back(std::move(entry));
+            return previous;
+        }
+
+        // Every tracked component loaded from uri (in any of its spellings), alive or not.
+        std::vector<Target> Match(std::wstring_view uri) const
+        {
+            std::vector<Target> targets;
+            std::wstring key;
+            if (NormalizeMarkupUri(uri, key) != nullptr)
+            {
+                return targets;
+            }
+            std::lock_guard<std::mutex> guard(m_lock);
+            for (const auto& entry : m_entries)
+            {
+                if (entry.Key == key)
+                {
+                    targets.push_back(entry.Component);
+                }
+            }
+            return targets;
+        }
+
+        std::size_t Size() const
+        {
+            std::lock_guard<std::mutex> guard(m_lock);
+            return m_entries.size();
+        }
+
+    private:
+        struct Entry
+        {
+            std::wstring Key;
+            const void* Identity = nullptr;   // compared only, never dereferenced
+            std::vector<std::uint16_t> RootProperties;
+            Target Component;
+        };
+
+        mutable std::mutex m_lock;
+        std::vector<Entry> m_entries;
+    };
+
     inline std::wstring StampPath(std::wstring_view appFolder)
     {
         std::wstring path(appFolder);

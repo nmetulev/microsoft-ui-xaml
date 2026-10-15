@@ -127,5 +127,34 @@ interface IXamlHotReloadService : IUnknown
     HRESULT InvalidateTypeCaches();
 };
 
+// IXamlHotReloadService2: loads live components again. A tool QIs for it; a runtime without it means the tool must
+// restart the app to show edits to components it can't reach itself (such as windows).
+[
+    object,
+    uuid(873A3D6E-441A-44AC-AC29-8D6F357FAC81),
+    pointer_default(unique)
+]
+interface IXamlHotReloadService2 : IXamlHotReloadService
+{
+    // Runs Application.LoadComponent again, with the markup currently in effect for uri, on every live component that
+    // was loaded from uri (in any spelling SetComponentMarkup accepts): pages, user controls, windows, the application,
+    // dictionaries with x:Class. Each runs on the component's own UI thread; the call waits for them (up to 30 seconds).
+    // Each component starts from fresh root resources, and root properties the previous markup set but the current
+    // markup doesn't are cleared. A component whose load fails keeps its previous resources. Code-behind does not run
+    // again. *count receives how many components loaded; the first failure is returned (S_OK with *count = 0 when no
+    // live component came from uri). Only components loaded in an app built with the hot reload stamp are tracked.
+    HRESULT ReloadComponents(
+        [in, string] LPCWSTR uri,
+        [out] UINT32* count);
+
+    // The live components loaded from uri (as tracked for ReloadComponents) that belong to the calling UI thread, so a
+    // tool can save per-instance state before ReloadComponents and put it back after. Each is AddRef'd; the array is
+    // allocated with CoTaskMemAlloc. Call it on each UI thread whose components the tool wants.
+    HRESULT GetLiveComponents(
+        [in, string] LPCWSTR uri,
+        [out] UINT32* count,
+        [out, size_is(, *count)] IInspectable*** components);
+};
+
 cpp_quote("#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */ ")
 cpp_quote("#pragma endregion")

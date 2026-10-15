@@ -566,11 +566,23 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
         }
     }
 
+    // Hot reload (stamped apps only): record the properties this markup sets on the component's root.
+    const bool trackForHotReload = XamlHotReloadOverrides::IsEnabledForApp();
+    std::vector<std::uint16_t> rootProperties;
+    XamlHotReloadOverrides::RootPropertyRecording recording{ pCoreDO, &rootProperties };
+    XamlHotReloadOverrides::RootPropertyRecording* const outerRecording = XamlHotReloadOverrides::t_rootRecording;
+    if (trackForHotReload)
+    {
+        XamlHotReloadOverrides::t_rootRecording = &recording;
+    }
+
     HRESULT hr = CoreImports::Application_LoadComponent(
         pCore->GetHandle(),
         pCoreDO,
         strUri,
         static_cast<::ComponentResourceLocation>(resourceLocation));
+
+    XamlHotReloadOverrides::t_rootRecording = outerRecording;
 
     if (FAILED(hr))
     {
@@ -580,6 +592,12 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
     }
 
     IFC_RETURN(hr);
+
+    if (trackForHotReload)
+    {
+        XamlHotReloadOverrides::OnComponentLoaded(
+            pComponent, pCoreDO, strUri.GetBuffer(), static_cast<std::int32_t>(resourceLocation), std::move(rootProperties));
+    }
 
     // Hot reload: tools subscribed through IXamlHotReloadService finish wiring a component built from replaced markup.
     XamlHotReloadOverrides::InvokeLoadCallbacks(pComponent, strUri.GetBuffer());
