@@ -18,10 +18,11 @@ namespace XamlHotReloadEncHarness;
 
 internal sealed class Harness
 {
-    // What a .NET 9/10 CoreCLR app reports (MetadataUpdater.GetCapabilities).
+    // What a .NET 10 CoreCLR app reports (MetadataUpdater.GetCapabilities).
     private const string RuntimeCapabilities =
         "Baseline AddMethodToExistingType AddStaticFieldToExistingType AddInstanceFieldToExistingType NewTypeDefinition " +
-        "ChangeCustomAttributes UpdateParameters GenericUpdateMethod GenericAddMethodToExistingType GenericAddFieldToExistingType";
+        "ChangeCustomAttributes UpdateParameters GenericUpdateMethod GenericAddMethodToExistingType GenericAddFieldToExistingType " +
+        "AddFieldRva AddExplicitInterfaceImplementation";
 
     private readonly string _projectFile;
     private readonly string _projectDir;
@@ -602,7 +603,9 @@ internal sealed class Harness
         DocumentId? id = _solution!.GetDocumentIdsWithFilePath(path).FirstOrDefault();
         if (id == null)
         {
-            return false;
+            // A new file with no code (the compiler writes " " for a ResourceDictionary without x:Class): adding it is a
+            // solution change with no semantic change, which Roslyn commits without a new baseline, the same as above.
+            return string.IsNullOrWhiteSpace(text.TrimStart('\uFEFF'));
         }
         string current = _solution.GetDocument(id)!.GetTextAsync().GetAwaiter().GetResult().ToString();
         return WithoutChecksums(current) == WithoutChecksums(text);
@@ -809,6 +812,7 @@ internal sealed class JourneyStep
         }
         if (Op == "create-file")
         {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             System.IO.File.WriteAllText(path, Text + "\r\n", new UTF8Encoding(true));
             return;
         }

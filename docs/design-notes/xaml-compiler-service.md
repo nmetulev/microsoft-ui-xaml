@@ -601,6 +601,24 @@ on a loaded machine), against 10 to 13.5 s for a cold service. A host still need
    save 2 removes it: NRE. Removing it after a build instead of an update applies. Generated code avoids it by keeping
    removed methods as inert tombstones (§1); user code that deletes a method it added in the same session still
    hits it.
+5. **`GetDeletedSynthesizedMethods` NullReferenceException after a no-change update that added documents** (pipeline:
+   todo-app-extended x14, `restart MainPage.xaml ... NullReferenceException`). This is issue 3 again, through added
+   documents instead of changed ones:
+   - x12 creates `Themes\Brand.xaml`, a ResourceDictionary without `x:Class`. Its generated `Brand.g.cs` and
+     `Brand.i.g.cs` contain only `" \r\n"` (as in a build). A host that adds them to the workspace makes a solution
+     change with no semantic change, and `DebuggingSession` commits it without a new baseline (`ModuleUpdateStatus.None`).
+   - The next update that touches a method an earlier update of the session added then throws. x14 adds a named
+     element to MainPage, which updates the template Bindings class whose TwoWay listener a22 added.
+   - The frame depends on which method it hits. `DeltaMetadataWriter.CreateDeletedMemberDefs` calls
+     `DefinitionMap.GetDeletedSynthesizedMethods` for every updated method, lambdas or not. It throws in
+     `GetPreviousMethodHandle` when the old method isn't found in `MethodsAdded`, and in `GetDeletedSynthesizedMethods`
+     itself when it is found but has no `AddedOrChangedMethods` entry (`peMethod` is null).
+   - Lambdas aren't the trigger. Hot reload codegen with named methods instead of the TwoWay lambdas moved the NRE to
+     another session-added method in the same save. With the original codegen and the host rule below, the journey
+     applies every save (harness: 41 of 41 from the baseline after a12, including x14). Without the rule, x14 throws.
+   - Host rule (the same as issue 3's): don't hand Roslyn an added generated file that has no code (whitespace only).
+     Hold it back and add it with the next real change. The EnC harness does this. To replay a winapp journey in the
+     harness, use `Tools\XamlHotReloadEncHarness\New-HarnessJourney.ps1`.
 
 ## Open questions and risks
 

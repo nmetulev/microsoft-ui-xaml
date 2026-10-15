@@ -25,7 +25,11 @@ namespace XamlHotReloadEncHarness;
 //
 // Journey steps: 'replace' and 'create-file' edits, and 'reload' (the service takes the build's inputs plus the
 // reference named by the step's text, as after a package was added; the harness's own builds and the C# project
-// reference it from then on).
+// reference it from then on). New-HarnessJourney.ps1 turns a winapp watch-hot-reload journey into an app and a journey.
+//
+// Host rules (what a hot reload host must do too): generated files that changed only in '#pragma checksum', and new
+// generated files with no code (a ResourceDictionary without x:Class), are held back until the next real change, since
+// Roslyn commits a no-change update without a new baseline (design note, Roslyn issues 3 and 5).
 internal static class Program
 {
     private static async Task<int> Main(string[] args)
