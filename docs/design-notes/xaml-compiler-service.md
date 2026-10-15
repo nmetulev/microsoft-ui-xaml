@@ -69,6 +69,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // A deleted page. Its generated files are left alone.
         public bool RemoveXamlPage(string xamlFile);
 
+        // New inputs from a build of the same project (a reference added, removed or updated). Unchanged
+        // references stay warm; rebuilt, deleted and removed ones are unloaded. A framework or WinUI reference
+        // change releases everything (FullReset). RefreshReferences: same inputs, files rebuilt on disk.
+        public XamlReloadResult ReloadInputs(CompilerInputs newInputs);
+        public XamlReloadResult RefreshReferences();
+
         // .g.i.cs (C#; .i.g.cs in hot reload builds) or .g.h (C++) for the given pages.
         // Doesn't need the project's assembly.
         public XamlCompileResult CompilePass1(IEnumerable<string> xamlFiles);
@@ -122,7 +128,7 @@ Before shipping we would:
 - Return results without writing to disk (today the compiler writes, and the service also returns
   the content).
 - Make the type universe per-instance instead of static, so one process can serve several projects.
-- Add a way to tell the service that references changed (today: dispose it and create a new one).
+- References: done in API v3 (`ReloadInputs`, `RefreshReferences`; see [References](#references)).
 
 ## State the service keeps
 
@@ -269,6 +275,7 @@ service compile generate the same shape.
 (`obj\...\XamlHotReload\`), even when the service writes its generated files elsewhere. A build and the service
 compiles that follow it continue one history. Clean deletes the folder.
 
+- **Indexed structural keys** for unnamed elements that aren't unique among their siblings (see the risks section).
 - **Deterministic transient IDs.** An element without a stable key (no `x:Name`, `x:Uid` or `x:Key`, and not unique
   by structure) used to get a new ID on every compile, so recompiling the same markup changed the output.
   - Each such element now has a fingerprint: scope, type and collision key.
@@ -423,6 +430,43 @@ loaded machine:
 
 The ledger, manifest and inventory work is 4 to 17 ms of that.
 
+## References
+
+`ReloadInputs(newInputs)` and `RefreshReferences()` (API v3) change the references of a warm service:
+
+- The universe records each loaded file's size and write time.
+- A reload unloads every loaded file that was rewritten or deleted, and every former reference that the new inputs
+  no longer list. It uses the same steps as the per-save swap of the project's assembly: the type name map, the
+  reflection helper caches, and the LMR universe and factory caches.
+- The next compile loads the new references and adds them to the type name map.
+- If a framework or WinUI reference changed, a reload releases the whole universe instead (`FullReset`), because
+  those types are cached in too many places. The next compile is then a cold one.
+
+WinUI Gallery, `XamlCompilerServiceHost reload` (CommunityToolkit.WinUI.Converters; every full compile is compared
+with a normal build), verbatim:
+
+```
+1. service created without CommunityToolkit.WinUI.Converters (cold)
+  compile: ... 10318 ms, ok=False, errors=7 (first: WMC0001 Unknown type 'EmptyObjectToObjectConverter' ...)
+2. ReloadInputs(with CommunityToolkit.WinUI.Converters): reload 25.0 ms, added 1, removed 0, released [], full reset False
+  compile: ... ok=True, errors=0; vs baseline: identical=777 differ=0 missing=0
+3. ReloadInputs(without ...): released [CommunityToolkit.WinUI.Converters.dll]
+  compile: ... ok=False, errors=7 (first: WMC0001 Unknown type ...)
+4. ReloadInputs(... -> a build of it with no types, at a temp path)
+  compile: ... ok=False, errors=7 (first: WMC0001 Unknown type ...)
+5. that file rebuilt in place, RefreshReferences(): reload 28.4 ms, released [CommunityToolkit.WinUI.Converters.dll]
+  compile: ... ok=True, errors=0; vs baseline: identical=777 differ=0 missing=0
+6. RefreshReferences() with nothing changed: released []
+  compile: ... ok=True; vs baseline: identical=777
+7. ReloadInputs(without Microsoft.WinUI.dll): released [Microsoft.WinUI.dll, ...], full reset True
+8. ReloadInputs(back to the build's inputs)
+  compile (cold: the universe was released): ... ok=True; vs baseline: identical=777 differ=0 missing=0
+```
+
+A reload takes 4 to 56 ms. The first full compile after it reads the new reference: 5.5 s (with type info, all pages,
+on a loaded machine), against 10 to 13.5 s for a cold service. A host still needs a build to get the new input.json
+(restore and reference resolution).
+
 ## Roslyn issues to file
 
 1. **NullReferenceException in `DefinitionMap.GetPreviousMethodHandle`** (Roslyn 5.9.0, SDK 10.0.401, through
@@ -452,8 +496,10 @@ The ledger, manifest and inventory work is 4 to 17 ms of that.
   - Tombstones exist only between builds; a build is a new baseline. A tombstone whose field type is a user type
     that was since deleted or renamed fails to compile. That edit is a rude edit in user code anyway, but the error
     shows up in generated code.
-  - Elements without a stable key get transient IDs. They are deterministic for unchanged markup, but moving such
-    an element can still renumber it, which retires the old field (a tombstone, not a rude edit).
+  - Unnamed elements that aren't unique among their siblings get an indexed structural key (parent, member, type,
+    position among same-type unnamed siblings), so an unchanged file keeps its IDs (Gallery: 543 ambiguous identities
+    before, 0 after). Inserting an unnamed sibling of the same type before one shifts the IDs after it, among fields of
+    the same type: not a rude edit. Transient IDs remain only under a parent without a stable identity.
   - WinUI's native metadata cache keeps the `IXamlType` objects it already resolved. The provider reset makes new
     types and members resolvable; a changed member on a type WinUI has already cached (for example a new dependency
     property on a user control that's on screen) may still need a restart. Not tested with a running app.
