@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="CacheProbe.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="CacheProbe">
+    <Grid RowDefinitions="Auto,*,Auto" ColumnDefinitions="*,*,*">
+        <TextBlock x:Name="Status" Grid.ColumnSpan="3" AutomationProperties.AutomationId="Status" Text="starting" TextWrapping="Wrap" />
+        <ContentControl x:Name="Old" Grid.Row="1" Grid.Column="0" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        <ContentControl x:Name="New" Grid.Row="1" Grid.Column="1" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+        <Frame x:Name="Host" Grid.Row="1" Grid.Column="2" />
+        <TextBlock x:Name="Result" Grid.Row="2" Grid.ColumnSpan="3" AutomationProperties.AutomationId="Result" Text="" TextWrapping="Wrap" />
+    </Grid>
+</Window>

@@ -1,0 +1,16 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:CacheProbe">
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Light">
+            <local:CountingResource x:Key="CountedLight" />
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Dark">
+            <local:CountingResource x:Key="CountedDark" />
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+    <local:CountingResource x:Key="Counted1" />
+    <local:CountingResource x:Key="Counted2" />
+    <x:String x:Key="EagerText">eager-v2</x:String>
+</ResourceDictionary>

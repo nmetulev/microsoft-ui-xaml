@@ -1,0 +1,8 @@
+bin/
+obj/
+packages/
+runs/
+tap/*.dll
+tap/*.lib
+tap/*.exp
+tap/*.obj

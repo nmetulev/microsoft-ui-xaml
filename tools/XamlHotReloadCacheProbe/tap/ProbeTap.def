@@ -1,0 +1,5 @@
+LIBRARY ProbeTap
+EXPORTS
+  DllGetClassObject PRIVATE
+  DllCanUnloadNow PRIVATE
+  ProbeTap_GetSite
