@@ -126,6 +126,10 @@ internal sealed class Runner
             case "resetsource-plain": await ResetSourcePlain(); break;
             case "implicit-code-swap": await ImplicitCodeSwap(); break;
             case "dict-reinit": await DictReinit(); break;
+            case "reload-pages": await ReloadPages(offThread: false); break;
+            case "reload-offthread": await ReloadPages(offThread: true); break;
+            case "reload-window": await ReloadWindow(); break;
+            case "reload-broken": await ReloadBroken(); break;
             case "deferral": await Deferral(); break;
             case "page-reinit-broken": await PageReinitBroken(); break;
             case "reinit-no-hotreload": await ReinitWithoutHotReload(); break;
@@ -147,6 +151,87 @@ internal sealed class Runner
         Check("replaced markup value", replaced["EagerText"], "eager-v2");
         GC.KeepAlive(built);
         await Task.CompletedTask;
+    }
+
+    // IXamlHotReloadService.ReloadComponents: every live page from the URI loads the replaced markup, in place.
+    private async Task ReloadPages(bool offThread)
+    {
+        var first = new ResPage();
+        var second = new ResPage();
+        _window.OldHost.Content = first;
+        _window.NewHost.Content = second;
+        await Settle();
+        Check("baseline root Tag", first.Tag, "root-v1");
+        var live = GetLiveComponents(ResPageUri);
+        Check("GetLiveComponents count", live.Count, "2");
+        Check("GetLiveComponents returns the live pages", live.Contains(first) && live.Contains(second), "True");
+        SetMarkup(ResPageUri, "V2", "ResPage.xaml");
+        var (hr, count) = offThread ? await Task.Run(() => ReloadComponents(ResPageUri)) : ReloadComponents(ResPageUri);
+        Log($"RELOAD {ResPageUri} {(offThread ? "from a background thread" : "on the UI thread")} hr=0x{hr:X8} count={count}");
+        Check("ReloadComponents hr", $"0x{hr:X8}", "0x00000000");
+        Check("ReloadComponents count", count, "2");
+        await Settle();
+        foreach (var (page, name) in new[] { (first, "first"), (second, "second") })
+        {
+            CheckPageMarkup(page, $"{name} reloaded page");
+            Check($"{name} root Tag removed from markup", page.Tag, "<null>");
+            Check($"{name} key removed from markup", page.Resources.ContainsKey("OnlyV1"), "False");
+            Check($"{name} key added in markup", page.Resources.ContainsKey("OnlyV2"), "True");
+        }
+        Check("same instances", ReferenceEquals(_window.OldHost.Content, first) && ReferenceEquals(_window.NewHost.Content, second), "True");
+    }
+
+    private async Task ReloadWindow()
+    {
+        var window = new ProbeWindow();
+        window.Activate();
+        await Settle();
+        Check("baseline window marker", Text((FrameworkElement)window.Content, "WindowMarker"), "window-v1");
+        Check("baseline window title", window.Title, "probe-v1");
+        const string uri = "ms-appx:///Pages/ProbeWindow.xaml";
+        SetMarkup(uri, "V2", "ProbeWindow.xaml");
+        var (hr, count) = ReloadComponents(uri);
+        Log($"RELOAD {uri} hr=0x{hr:X8} count={count}");
+        if (hr < 0)
+        {
+            try
+            {
+                Application.LoadComponent(window, new Uri(uri));
+                Log("NOTE direct LoadComponent succeeded");
+            }
+            catch (Exception ex)
+            {
+                Log($"NOTE direct LoadComponent: {ex.Message.Replace('\n', ' ').Replace('\r', ' ')}");
+            }
+        }
+        Check("ReloadComponents count (a Window)", count, "1");
+        await Task.Delay(300);
+        window.Content?.UpdateLayout();
+        Check("window marker after reload", Text((FrameworkElement)window.Content!, "WindowMarker"), "window-v2");
+        Check("window title after reload", window.Title, "probe-v2");
+        window.Close();
+    }
+
+    private async Task ReloadBroken()
+    {
+        var page = new ResPage();
+        _window.OldHost.Content = page;
+        await Settle();
+        SetMarkup(ResPageUri, "Broken", "ResPage.xaml");
+        var (hr, count) = ReloadComponents(ResPageUri);
+        Log($"RELOAD broken markup hr=0x{hr:X8} count={count}");
+        Check("ReloadComponents reports the failure", hr < 0, "True");
+        Check("nothing counted as loaded", count, "0");
+        await Settle();
+        Check("old content kept", Text(page, "PageMarker"), "marker-v1");
+        Check("old resources kept", page.Resources.TryGetValue("PageText", out var value) ? value : "<missing>", "page-v1");
+        Check("old root Tag kept", page.Tag, "root-v1");
+        SetMarkup(ResPageUri, "V2", "ResPage.xaml");
+        (hr, count) = ReloadComponents(ResPageUri);
+        Log($"RELOAD fixed markup hr=0x{hr:X8} count={count}");
+        await Settle();
+        Check("fixed markup loads after a failure", Text(page, "PageMarker"), "marker-v2");
+        Check("root Tag removed after the failure then fix", page.Tag, "<null>");
     }
 
     // A ResourceDictionary with x:Class (its own InitializeComponent) re-initialized with replaced markup.
@@ -471,6 +556,45 @@ internal sealed class Runner
         Marshal.ThrowExceptionForHR(hr);
     }
 
+    private static bool s_hasService2;
+    private const int NoInterface = unchecked((int)0x80004002);
+
+    private unsafe (int Hr, uint Count) ReloadComponents(string uri)
+    {
+        if (!s_hasService2)
+        {
+            return (NoInterface, 0);
+        }
+        uint count;
+        int hr;
+        fixed (char* u = uri)
+        {
+            hr = ((delegate* unmanaged[Stdcall]<IntPtr, char*, uint*, int>)Vtbl[9])(_service, u, &count);
+        }
+        return (hr, count);
+    }
+
+    private unsafe List<object> GetLiveComponents(string uri)
+    {
+        Marshal.ThrowExceptionForHR(s_hasService2 ? 0 : NoInterface);
+        uint count;
+        IntPtr* array;
+        int hr;
+        fixed (char* u = uri)
+        {
+            hr = ((delegate* unmanaged[Stdcall]<IntPtr, char*, uint*, IntPtr**, int>)Vtbl[10])(_service, u, &count, &array);
+        }
+        Marshal.ThrowExceptionForHR(hr);
+        var result = new List<object>();
+        for (var i = 0; i < count; i++)
+        {
+            result.Add(WinRT.MarshalInspectable<object>.FromAbi(array[i]));
+            Marshal.Release(array[i]);
+        }
+        Marshal.FreeCoTaskMem((IntPtr)array);
+        return result;
+    }
+
     private unsafe void** Vtbl => *(void***)_service;
 
     /// <summary>What a tool does after a merged dictionary's markup changed: re-load the app's copy of it.</summary>
@@ -527,8 +651,14 @@ internal sealed class Runner
         {
             if (GetSite(getSite, out var site) >= 0)
             {
+                // IXamlHotReloadService2 (ReloadComponents, GetLiveComponents) when the runtime has it.
+                var iid2 = new Guid("873A3D6E-441A-44AC-AC29-8D6F357FAC81");
                 var iid = new Guid("73A07052-1BFE-40CD-8DC4-FB3D7A5BCECF");
-                Marshal.ThrowExceptionForHR(Marshal.QueryInterface(site, in iid, out var service));
+                s_hasService2 = Marshal.QueryInterface(site, in iid2, out var service) >= 0;
+                if (!s_hasService2)
+                {
+                    Marshal.ThrowExceptionForHR(Marshal.QueryInterface(site, in iid, out service));
+                }
                 Marshal.Release(site);
                 return service;
             }

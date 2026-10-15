@@ -11,7 +11,8 @@ param(
     [string[]]$Scenarios = @(
         'merged-new', 'merged-swap', 'merged-resetsource', 'negcache-swap', 'generic', 'page-new', 'page-reinit',
         'page-reinit-reset', 'page-reinit-broken', 'dict-reinit', 'loose', 'cycle', 'frame-cache', 'app-reload',
-        'implicit-code-swap', 'resetsource-plain', 'deferral'),
+        'implicit-code-swap', 'resetsource-plain', 'deferral', 'reload-pages', 'reload-offthread', 'reload-window',
+        'reload-broken'),
     # text: XAML text through SetComponentMarkup; binary: the compiled .xbf; nodiag: no diagnostics attached (controls).
     [string[]]$Modes = @('text', 'binary'),
     [string]$OutDir = (Join-Path $PSScriptRoot "runs\$(Get-Date -Format 'yyyyMMdd-HHmmss')"),
