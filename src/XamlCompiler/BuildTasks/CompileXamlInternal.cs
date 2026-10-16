@@ -1971,7 +1971,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             else
             {
+                bool recordsTypeOrder = IsHotReloadCodeGen && !IsPass1 && _typeInfoCollector.SchemaInfo != null;
+                string typeOrderPath = recordsTypeOrder ? HotReloadStatePaths.GetTypeOrderPath(HotReloadStateFolder) : null;
+                if (recordsTypeOrder)
+                {
+                    _typeInfoCollector.SchemaInfo.HotReloadPreviousTypeOrder = File.Exists(typeOrderPath)
+                        ? HotReloadJsonFile.Read<List<string>>(typeOrderPath)
+                        : null;
+                }
                 codeFiles = _codeGenerator.GenerateTypeInfo(_typeInfoCollector.AppXamlInfo);
+                if (recordsTypeOrder)
+                {
+                    HotReloadJsonFile.Write(typeOrderPath, _typeInfoCollector.SchemaInfo.TypeTableOrder);
+                }
             }
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_GenerateTypeInfoEnd);
 
@@ -2354,9 +2366,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         // Compiler service, C# hot reload builds: a page that isn't being compiled contributes the same type information as
         // last time while its markup is unchanged, so it is replayed instead of parsed (see PageTypeInfoCache).
-        private bool UsePageTypeInfoCache => IsServiceCompile && IsHotReloadCodeGen && !IsPass1 && _localAssembly != null && !s_typeInfoCacheDisabled;
+        private bool UsePageTypeInfoCache => IsServiceCompile && IsHotReloadCodeGen && !IsPass1 && _localAssembly != null && !s_typeInfoCacheDisabled && !ServiceDisableTypeInfoCache;
         // Kill switch, and the A/B for measurements.
         private static readonly bool s_typeInfoCacheDisabled = Environment.GetEnvironmentVariable("XAML_COMPILER_SERVICE_NO_TYPEINFO_CACHE") == "1";
+        // The service's type information check (XamlCompilerService.VerifyTypeInfo): collect every page, replay nothing.
+        internal bool ServiceDisableTypeInfoCache { get; set; }
         private Dictionary<string, Assembly> _replayAssemblies;
         private readonly Dictionary<Type, string> _replayShapes = new Dictionary<Type, string>();
         private readonly HashSet<string> _replayedKeys = new HashSet<string>(StringComparer.Ordinal);

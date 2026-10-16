@@ -19,7 +19,17 @@ namespace XamlHotReloadEncHarness;
 //   --mode hot-reload  EnableXamlHotReload: stable IDs plus the hot reload code generation (default)
 //   --extra            extra steps after the journey (an x:Name element changing type)
 //   --verify-build     after every XAML save, build the same sources and state with XamlCompiler.exe and compare
-//                      every generated file with the service's (tombstones are the one intended difference)
+//                      every generated file with the service's (tombstones are the one intended difference); and
+//                      check every XamlTypeInfo the service builds from its per-page cache against collecting every
+//                      page (XamlCompilerService.VerifyTypeInfo: a difference fails the save with WMC9998)
+//
+// Journey steps: 'replace' and 'create-file' edits, and 'reload' (the service takes the build's inputs plus the
+// reference named by the step's text, as after a package was added; the harness's own builds and the C# project
+// reference it from then on). New-HarnessJourney.ps1 turns a winapp watch-hot-reload journey into an app and a journey.
+//
+// Host rules (what a hot reload host must do too): generated files that changed only in '#pragma checksum', and new
+// generated files with no code (a ResourceDictionary without x:Class), are held back until the next real change, since
+// Roslyn commits a no-change update without a new baseline (design note, Roslyn issues 3 and 5).
 internal static class Program
 {
     private static async Task<int> Main(string[] args)

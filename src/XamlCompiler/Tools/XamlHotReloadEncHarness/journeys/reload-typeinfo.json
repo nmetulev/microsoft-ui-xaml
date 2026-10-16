@@ -1,0 +1,228 @@
+{
+  "segments": [
+    {
+      "actions": [
+        {
+          "id": "b1-badge-markup",
+          "title": "b1-badge-markup",
+          "file": "Badge.xaml",
+          "edit": {
+            "op": "create-file",
+            "text": [
+              "<?xml version=\"1.0\" encoding=\"utf-8\" ?>",
+              "<UserControl x:Class=\"TodoBench.Badge\" xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" xmlns:local=\"using:TodoBench\">",
+              "    <StackPanel>",
+              "        <TextBlock AutomationProperties.AutomationId=\"BadgeStamp\" Text=\"badge markup v1\" />",
+              "        <TextBlock AutomationProperties.AutomationId=\"BadgeText\" Text=\"{x:Bind Label, Mode=OneWay}\" />",
+              "    </StackPanel>",
+              "</UserControl>"
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "b2-badge-code",
+          "title": "b2-badge-code",
+          "file": "Badge.xaml.cs",
+          "edit": {
+            "op": "create-file",
+            "text": [
+              "using Microsoft.UI.Xaml;",
+              "using Microsoft.UI.Xaml.Controls;",
+              "",
+              "namespace TodoBench;",
+              "",
+              "public sealed partial class Badge : UserControl",
+              "{",
+              "    public static readonly DependencyProperty LabelProperty =",
+              "        DependencyProperty.Register(nameof(Label), typeof(string), typeof(Badge), new PropertyMetadata(\"\"));",
+              "",
+              "    public Badge()",
+              "    {",
+              "        InitializeComponent();",
+              "    }",
+              "",
+              "    public string Label",
+              "    {",
+              "        get => (string)GetValue(LabelProperty);",
+              "        set => SetValue(LabelProperty, value);",
+              "    }",
+              "}"
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "p1-pill-code",
+          "title": "p1",
+          "file": "Pill.cs",
+          "edit": {
+            "op": "create-file",
+            "text": [
+              "using Microsoft.UI.Xaml.Controls;",
+              "",
+              "namespace TodoBench;",
+              "",
+              "public sealed class Pill : Control",
+              "{",
+              "}"
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "b3-badge-and-pill-used",
+          "title": "b3",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "        <TextBlock AutomationProperties.AutomationId=\"Plain\""
+            ],
+            "text": [
+              "        <local:Badge Label=\"badge v1\" />",
+              "        <local:Pill />",
+              "        <TextBlock AutomationProperties.AutomationId=\"Plain\""
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "r1-reload-package",
+          "title": "reload",
+          "file": "TodoBench.csproj",
+          "edit": {
+            "op": "reload",
+            "text": [
+              "C:\\.tools\\.nuget\\packages\\communitytoolkit.winui.converters\\8.2.251219\\lib\\net9.0-windows10.0.19041\\CommunityToolkit.WinUI.Converters.dll"
+            ]
+          },
+          "expect": {
+            "outcome": "reloaded"
+          }
+        },
+        {
+          "id": "m1-main-xmlns",
+          "title": "m1",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "<Page x:Class=\"TodoBench.MainPage\""
+            ],
+            "text": [
+              "<Page xmlns:tk=\"using:CommunityToolkit.WinUI.Converters\" x:Class=\"TodoBench.MainPage\""
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "b7-main-edit",
+          "title": "b7-main-edit",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "Text=\"plain v1\""
+            ],
+            "text": [
+              "Text=\"plain v2\""
+            ]
+          },
+          "expect": {
+            "outcome": "applied"
+          }
+        },
+        {
+          "id": "n1-newpage-markup",
+          "title": "n1-newpage-markup",
+          "file": "Card2.xaml",
+          "edit": {
+            "op": "create-file",
+            "text": [
+              "<?xml version=\"1.0\" encoding=\"utf-8\" ?>",
+              "<UserControl x:Class=\"TodoBench.Card2\" xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\">",
+              "    <TextBlock x:Name=\"CardText\" Text=\"card2 v1\" />",
+              "</UserControl>"
+            ]
+          }
+        },
+        {
+          "id": "n2-newpage-code",
+          "title": "n2-newpage-code",
+          "file": "Card2.xaml.cs",
+          "edit": {
+            "op": "create-file",
+            "text": [
+              "using Microsoft.UI.Xaml.Controls;",
+              "",
+              "namespace TodoBench;",
+              "",
+              "partial class Card2 : UserControl",
+              "{",
+              "    public Card2() { InitializeComponent(); }",
+              "}"
+            ]
+          }
+        },
+        {
+          "id": "n3-use-newpage",
+          "title": "n3-use-newpage",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "        <local:Pill />"
+            ],
+            "text": [
+              "        <local:Pill />",
+              "        <local:Card2 />"
+            ]
+          }
+        },
+        {
+          "id": "n4-use-package-type",
+          "title": "n4-use-package-type",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "        <local:Card2 />"
+            ],
+            "text": [
+              "        <local:Card2>",
+              "            <local:Card2.Resources>",
+              "                <tk:BoolToVisibilityConverter x:Key=\"B2V\" />",
+              "            </local:Card2.Resources>",
+              "        </local:Card2>"
+            ]
+          }
+        },
+        {
+          "id": "n5-edit-again",
+          "title": "n5-edit-again",
+          "file": "MainPage.xaml",
+          "edit": {
+            "op": "replace",
+            "find": [
+              "        <local:Pill />"
+            ],
+            "text": [
+              "        <local:Pill Tag=\"v2\" />"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

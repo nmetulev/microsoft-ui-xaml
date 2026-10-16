@@ -3,6 +3,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Win8Xaml.CompilerProxies;
 
@@ -156,6 +157,79 @@ namespace UnitTests
             Assert.IsFalse(tombstones.Contains("Generic"), tombstones);
             Assert.IsFalse(tombstones.Contains("Page()"), tombstones);
             Assert.IsFalse(tombstones.Contains("InitializeXProperties"), tombstones);
+        }
+
+        // A type added mid-session keeps every existing type's index (XamlTypeInfo indexes types by position), and the
+        // tables and CreateXamlType come in blocks, so the update only touches the last block. Normal builds don't change.
+        [TestMethod]
+        public void HotReload_TypeInfoKeepsTypeIndicesWhenTypesAreAdded()
+        {
+            const string before = @"<Page xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation'
+    xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml'
+    xmlns:dll='using:LibManagedDll'>
+    <Page.Resources>
+        <dll:SimpleClass x:Key='key'/>
+    </Page.Resources>
+</Page>";
+            string after = before.Replace("<dll:SimpleClass x:Key='key'/>", "<dll:SimpleClass x:Key='key'/>\r\n        <dll:NamedElementForPathing x:Key='added'/>");
+
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            (string code, List<string> order) Generate(string xaml, bool hotReload, List<string> previousOrder)
+            {
+                DirectUISchemaContext schema = _testHelper.LoadSchema(SchemaMode.ManagedRuntime | SchemaMode.LoadUserDll);
+                TypeInfoCollector collector = _testHelper.CollectTypes(xaml, schema);
+                object info = collector.SchemaInfo.Instance;
+                info.GetType().GetProperty("HotReloadPreviousTypeOrder", flags).SetValue(info, previousOrder);
+                var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "HotReloadTypeOrder");
+                context.IsLibrary = true;
+                context.RootNamespace = "HotReloadTypeOrder";
+                context.ProjectInfo.SetCodeGenFlags("FullXamlMetadataProvider");
+                context.ProjectInfo.IsHotReloadBuild = hotReload;
+                context.ProjectInfo.IsHotReloadCodeGen = hotReload;
+                List<FileNameAndContentPair> pairs = _testHelper.GenerateTypeInfo(false, collector.SchemaInfo, context.ProjectInfo,
+                    new ClassName("HotReloadTypeOrder.App"), CodeGenLanguage.CSharp);
+                return (pairs[0].Contents, (List<string>)info.GetType().GetProperty("TypeTableOrder", flags).GetValue(info));
+            }
+            Dictionary<string, int> Indices(string code)
+            {
+                var indices = new Dictionary<string, int>();
+                foreach (Match m in Regex.Matches(code, "_typeNameTable\\[(\\d+)\\] = \"([^\"]+)\";"))
+                {
+                    indices[m.Groups[2].Value] = int.Parse(m.Groups[1].Value);
+                }
+                return indices;
+            }
+
+            (string first, List<string> firstOrder) = Generate(before, true, null);
+            (string sorted, _) = Generate(after, true, null);
+            (string appended, List<string> appendedOrder) = Generate(after, true, firstOrder);
+
+            Dictionary<string, int> firstIndices = Indices(first);
+            Dictionary<string, int> appendedIndices = Indices(appended);
+            Assert.IsTrue(firstIndices.Count > 2, first);
+            Assert.IsTrue(appendedIndices.Count > firstIndices.Count, appended);
+            foreach (KeyValuePair<string, int> type in firstIndices)
+            {
+                Assert.AreEqual(type.Value, appendedIndices[type.Key], type.Key);
+            }
+            foreach (KeyValuePair<string, int> type in appendedIndices.Where(t => !firstIndices.ContainsKey(t.Key)))
+            {
+                Assert.IsTrue(type.Value >= firstIndices.Count, type.Key);
+            }
+            Assert.IsTrue(appendedIndices["LibManagedDll.NamedElementForPathing"] >= firstIndices.Count, appended);
+            CollectionAssert.AreEqual(firstOrder, appendedOrder.Take(firstOrder.Count).ToList());
+            // Without a recorded order (a first build) the table is sorted by name, so the new type lands mid-table.
+            Assert.IsTrue(Indices(sorted)["LibManagedDll.NamedElementForPathing"] < firstIndices.Count, sorted);
+
+            StringAssert.Contains(appended, "InitTypeTables_0();");
+            StringAssert.Contains(appended, "case 0: return CreateXamlType_0(typeIndex, typeName, type);");
+            Assert.IsTrue(Regex.IsMatch(appended, @"return Create_\w+_SimpleClass\(typeName, type\);"), appended);
+            Assert.IsTrue(Regex.IsMatch(appended, @"XamlUserType Create_\w+_SimpleClass\(string typeName, global::System.Type type\)"), appended);
+
+            (string normal, _) = Generate(after, false, firstOrder);
+            Assert.IsFalse(normal.Contains("InitTypeTables_"), normal);
+            Assert.IsFalse(Regex.IsMatch(normal, @"Create_\w+_SimpleClass"), normal);
+            StringAssert.Contains(normal, "switch (typeIndex)");
         }
 
         private string GenerateTypeInfoWithOtherProvider(bool hotReload, string codeGenFlags)
