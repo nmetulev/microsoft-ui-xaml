@@ -133,12 +133,46 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get { return _userMemberInfo; }
         }
 
+        // Hot reload builds, pass 2: the type order of the last XamlTypeInfo (see SortForHotReload); null sorts by name.
+        internal IList<string> HotReloadPreviousTypeOrder { get; set; }
+
+        // The type table's names in table order (after SortForHotReload: the order to record for the next compile).
+        internal List<string> TypeTableOrder
+        {
+            get { return _typeTable.Select(t => t.SystemName).ToList(); }
+        }
+
         // Hot reload builds: the type and member tables in a canonical order (by name, ordinal) instead of the order in
         // which the compile happened to meet them. That order depends on what a long-lived compiler service looked up
         // before, so without this a service compile and a build can number XamlTypeInfo differently.
-        public void SortForHotReload()
+        // With previousTypeOrder (the order the last hot reload compile of the project numbered the types in), types it
+        // lists keep their relative order and new types follow, sorted: XamlTypeInfo indexes types by position
+        // (_typeNameTable[i], case i), so a type added mid-session would otherwise renumber every later type, and .NET
+        // hot reload would recompile the whole provider. A type no longer used is dropped.
+        public void SortForHotReload(IList<string> previousTypeOrder = null)
         {
-            _typeTable.Sort((a, b) => String.CompareOrdinal(a.SystemName, b.SystemName));
+            var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = 0; previousTypeOrder != null && i < previousTypeOrder.Count; i++)
+            {
+                if (!rank.ContainsKey(previousTypeOrder[i]))
+                {
+                    rank.Add(previousTypeOrder[i], i);
+                }
+            }
+            _typeTable.Sort((a, b) =>
+            {
+                bool knownA = rank.TryGetValue(a.SystemName, out int rankA);
+                bool knownB = rank.TryGetValue(b.SystemName, out int rankB);
+                if (knownA && knownB)
+                {
+                    return rankA.CompareTo(rankB);
+                }
+                if (knownA != knownB)
+                {
+                    return knownA ? -1 : 1;
+                }
+                return String.CompareOrdinal(a.SystemName, b.SystemName);
+            });
             for (int i = 0; i < _typeTable.Count; i++)
             {
                 _typeTable[i].ResetTypeIndex(i);

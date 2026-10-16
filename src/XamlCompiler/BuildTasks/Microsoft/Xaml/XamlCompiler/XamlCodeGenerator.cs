@@ -155,7 +155,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             }
             if (_projectInfo.IsHotReloadCodeGen && !_isPass1 && _schemaInfo != null)
             {
-                _schemaInfo.SortForHotReload();
+                _schemaInfo.SortForHotReload(_schemaInfo.HotReloadPreviousTypeOrder);
             }
             T4Base codeGenerator;
             codeGenerator = codeGenDelegate();

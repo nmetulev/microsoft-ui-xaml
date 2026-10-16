@@ -724,6 +724,7 @@ this.Write(@" xmp in OtherProviders)
          }                               
          private void Output_TypeTables()     
          {                                       
+             int hotReloadTablesStart = HotReloadBeginCapture();
 this.Write("        string[] _typeNameTable = null;\r\n        global::System.Type[] _typeTable" +
         " = null;\r\n        \r\n        private void InitTypeTables()\r\n        {\r\n          " +
         "  _typeNameTable = new string[");
@@ -811,9 +812,11 @@ this.Write(@"        }
         }
 ");
 
+             HotReloadEndTypeTables(hotReloadTablesStart);
          }                                       
          private void Output_CreateXamlType()    
          {                                       
+             int hotReloadCreateStart = HotReloadBeginCapture();
 this.Write("        private ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlType)));
@@ -863,6 +866,7 @@ this.Write(".XamlSystemBaseType(typeName, type);\r\n                break;\r\n")
                      else                                
                      {                                   
                          InternalXamlUserTypeInfo uentry = entry.UserTypeInfo;   
+                         int hotReloadBodyStart = HotReloadBeginTypeBody();
                          if(uentry.BaseType == null)     
                          {                               
 this.Write("                userType = new ");
@@ -1039,6 +1043,7 @@ this.Write("                userType.SetIsReturnTypeStub();\r\n");
 this.Write("                userType.SetIsLocalType();\r\n");
 
                          }                               
+                         HotReloadEndTypeBody(uentry, hotReloadBodyStart);
 this.Write("                xamlType = userType;\r\n                break;\r\n");
 
                      }   
@@ -1048,6 +1053,7 @@ this.Write("            }\r\n");
              }       
 this.Write("            return xamlType;\r\n        }\r\n");
 
+             HotReloadEndCreateXamlType(hotReloadCreateStart);
          }           
          private void Output_Activators()                                        
          {                                                                       

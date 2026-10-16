@@ -392,6 +392,17 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             return "Activate_" + TypeKey(entry) + "_" + entry.Name;
         }
 
+        // Hot reload builds: the method that creates a user type's IXamlType (see CSharpTypeInfoPass2.HotReload.cs).
+        public String CreateTypeName(InternalXamlUserTypeInfo entry)
+        {
+            var name = new System.Text.StringBuilder("Create_" + TypeKey(entry) + "_");
+            foreach (char c in entry.Name)
+            {
+                name.Append(Char.IsLetterOrDigit(c) || c == '_' ? c : '_');
+            }
+            return name.ToString();
+        }
+
         public String StaticInitializerName(InternalXamlUserTypeInfo entry)
         {
             return "StaticInitializer_" + TypeKey(entry) + "_" + entry.Name;

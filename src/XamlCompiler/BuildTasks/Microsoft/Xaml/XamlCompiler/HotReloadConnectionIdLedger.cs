@@ -143,6 +143,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.members.json"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "*.tmp"))
                     .Concat(Directory.GetFiles(ledgerDirectory, "connection-ids.pending"))
+                    .Concat(Directory.GetFiles(ledgerDirectory, HotReloadStatePaths.TypeOrderFileName))
                     .Concat(Directory.GetFiles(ledgerDirectory, "codegen.json")))
                 {
                     File.Delete(path);
@@ -1253,6 +1254,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         internal const string LedgerExtension = ".connids.json";
         internal const string ManifestExtension = ".hotreload.json";
         internal const string MembersExtension = ".members.json";
+        // The type order of the last hot reload XamlTypeInfo (XamlSchemaCodeInfo.SortForHotReload).
+        internal const string TypeOrderFileName = "typeinfo.json";
         internal const int MaxPath = 259;
 
         // The longest name in the folder: <12 hex>.i.g.cs.members.json is 32 characters.
@@ -1265,6 +1268,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         {
             string folder = Path.Combine(Path.GetFullPath(stateFolder), FolderName);
             return folder.Length + 1 + MaxFileNameLength > MaxPath ? ToExtendedLengthPath(folder) : folder;
+        }
+
+        internal static string GetTypeOrderPath(string stateFolder)
+        {
+            return Path.Combine(GetFolder(stateFolder), TypeOrderFileName);
         }
 
         internal static string ToExtendedLengthPath(string fullPath)

@@ -77,3 +77,9 @@ Host duty (no API change), Roslyn issues 3 and 5 in the design note
     no-change update that Roslyn commits without a new baseline; the next update of a method added during the session
     then throws NullReferenceException (GetPreviousMethodHandle or GetDeletedSynthesizedMethods). Hold both back and
     hand them over with the next real change.
+
+v4, behavior (no API change): stable XamlTypeInfo layout (hot reload builds, C#)
+  * <OutputPath>XamlHotReload\typeinfo.json records the type table order of the last XamlTypeInfo (builds and service
+    compiles); types keep their index and new types are appended, so adding a type mid-session no longer renumbers the
+    table. Clean deletes it. Each user type's IXamlType is built in Create_<key>_<Name>; InitTypeTables and
+    CreateXamlType dispatch to blocks of 64 indices. Normal builds (EnableXamlHotReload off) are unchanged.
