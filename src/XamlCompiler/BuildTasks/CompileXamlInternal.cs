@@ -1971,7 +1971,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             else
             {
+                bool recordsTypeOrder = IsHotReloadCodeGen && !IsPass1 && _typeInfoCollector.SchemaInfo != null;
+                string typeOrderPath = recordsTypeOrder ? HotReloadStatePaths.GetTypeOrderPath(HotReloadStateFolder) : null;
+                if (recordsTypeOrder)
+                {
+                    _typeInfoCollector.SchemaInfo.HotReloadPreviousTypeOrder = File.Exists(typeOrderPath)
+                        ? HotReloadJsonFile.Read<List<string>>(typeOrderPath)
+                        : null;
+                }
                 codeFiles = _codeGenerator.GenerateTypeInfo(_typeInfoCollector.AppXamlInfo);
+                if (recordsTypeOrder)
+                {
+                    HotReloadJsonFile.Write(typeOrderPath, _typeInfoCollector.SchemaInfo.TypeTableOrder);
+                }
             }
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_GenerateTypeInfoEnd);
 

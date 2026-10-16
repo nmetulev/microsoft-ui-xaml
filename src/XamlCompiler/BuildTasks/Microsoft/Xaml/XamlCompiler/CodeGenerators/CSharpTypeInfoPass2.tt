@@ -721,6 +721,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 
 <#+         private void Output_TypeTables()     #>
 <#+         {                                       #>
+<#+             int hotReloadTablesStart = HotReloadBeginCapture(); #>
         string[] _typeNameTable = null;
         global::System.Type[] _typeTable = null;
         
@@ -780,11 +781,13 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
             }
             return -1;
         }
+<#+             HotReloadEndTypeTables(hotReloadTablesStart); #>
 <#+         }                                       #>
 
 
 <#+         private void Output_CreateXamlType()    #>
 <#+         {                                       #>
+<#+             int hotReloadCreateStart = HotReloadBeginCapture(); #>
         private <#=Globalize(KnownTypes.IXamlType)#> CreateXamlType(int typeIndex)
         {
             <#=Globalize(ProjectInfo.XamlTypeInfoNamespace)#>.XamlSystemBaseType xamlType = null;
@@ -812,6 +815,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 <#+                     else                                #>
 <#+                     {                                   #>
 <#+                         InternalXamlUserTypeInfo uentry = entry.UserTypeInfo;   #>
+<#+                         int hotReloadBodyStart = HotReloadBeginTypeBody(); #>
 <#+                         if(uentry.BaseType == null)     #>
 <#+                         {                               #>
                 userType = new <#=Globalize(ProjectInfo.XamlTypeInfoNamespace)#>.XamlUserType(this, typeName, type, null);
@@ -901,6 +905,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 <#+                         {                               #>
                 userType.SetIsLocalType();
 <#+                         }                               #>
+<#+                         HotReloadEndTypeBody(uentry, hotReloadBodyStart); #>
                 xamlType = userType;
                 break;
 <#+                     }   #>
@@ -909,6 +914,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 <#+             }       #>
             return xamlType;
         }
+<#+             HotReloadEndCreateXamlType(hotReloadCreateStart); #>
 <#+         }           #>
 
 

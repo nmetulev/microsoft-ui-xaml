@@ -379,6 +379,21 @@ Options considered:
 - **Per save, XamlTypeInfo is not regenerated** (`regenerateTypeInfo: false`) unless `XamlTypeInfoMayBeStale` says a
   page uses a type or member that isn't in it; then `CompilePass2([page], image, regenerateTypeInfo: true)`. A removal
   leaves a harmless superset until the next regeneration.
+- **Stable XamlTypeInfo layout for new types** (hot reload builds, C#). XamlTypeInfo indexes types by position
+  (`_typeNameTable[i]`, `case i:`). With the table sorted by name, a type added mid-session renumbered every later type,
+  and .NET hot reload recompiled `InitTypeTables` and `CreateXamlType` whole. On AI Dev Gallery that was a 10 s
+  edit-and-continue pass for a new UserControl.
+  - The type order of the last XamlTypeInfo is kept in `XamlHotReload\typeinfo.json`, written by builds and service
+    compiles alike. Types it lists keep their order and new types follow, sorted. Without it (first build, after
+    Clean) the table is sorted by name, as before. A type no longer used is dropped, which shifts the types after it.
+  - Each user type's IXamlType is built in its own method, `Create_<type key>_<Name>` (the case bodies, moved).
+    `InitTypeTables` and `CreateXamlType` dispatch to blocks of 64 indices (`InitTypeTables_<n>`,
+    `CreateXamlType_<n>`), so an appended type changes the last block, the dispatchers and its own new method.
+  - WinUI Gallery (about 570 types, a 1.3 MB XamlTypeInfo.g.cs), harness, the save that adds a UserControl,
+    edit-and-continue time: 7.0–7.7 s before; 2.7–2.8 s with the order kept; 2.0–2.1 s with per-type methods;
+    1.78–1.80 s with blocks. The delta went from IL 62 KB and metadata 93 KB to IL 3.5 KB and metadata 10 KB.
+    What remains is Roslyn analyzing the 20,000-line document.
+  - Normal builds are unchanged: Gallery 777 of 777 identical with the flags off.
 - **Per-page type info cache** (`PageTypeInfoCache`, service only). Regenerating XamlTypeInfo reads every page for
   type information.
   - The service records each page's calls into the schema info (types and members by name), keyed by the page's
