@@ -44,10 +44,12 @@
         <ClInclude Include="ElementStateChangedBuilderTests.h"/>
         <ClInclude Include="HandleMapUnitTests.h"/>
         <ClInclude Include="GraphicsResourceDiagnosticsTests.h"/>
+        <ClInclude Include="XamlHotReloadRegistryUnitTests.h"/>
 
         <ClCompile Include="HandleMapUnitTests.cpp"/>
         <ClCompile Include="ElementStateChangedBuilderTests.cpp"/>
         <ClCompile Include="GraphicsResourceDiagnosticsTests.cpp"/>
+        <ClCompile Include="XamlHotReloadRegistryUnitTests.cpp"/>
     </ItemGroup>
 
     <ItemDefinitionGroup>
