@@ -107,6 +107,9 @@ namespace DirectUI
             ResourceDictionary* m_pAppStyles;
             StyleResourceHelper m_resourceHelper;
 
+            // The XamlHotReload::g_markupGeneration the cached styles were loaded under.
+            std::uint32_t m_hotReloadGeneration = 0;
+
             _Check_return_ HRESULT LoadStylesFromFile(
                 _In_z_ const WCHAR* wszXamlFilePath,
                 _Outptr_ ResourceDictionary** ppStyles);

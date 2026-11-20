@@ -4,6 +4,7 @@
 #include "precomp.h"
 #include "corep.h"
 #include "xcpwindow.h"
+#include <XamlHotReload.h>
 
 _Check_return_
 HRESULT ResourceManager::Create(
@@ -120,6 +121,13 @@ _Check_return_ HRESULT ResourceManager::TryGetLocalResource(
     *ppResource = NULL;
 
     xstring_ptr strScheme;
+
+    // XAML hot reload: a component's replaced .xbf wins over the built one.
+    IFC(XamlHotReload::TryGetReplacedXbf(pResourceUri, ppResource));
+    if (*ppResource)
+    {
+        goto Cleanup;
+    }
 
     IFC(UriXStringGetters::GetScheme(pResourceUri, &strScheme));
 

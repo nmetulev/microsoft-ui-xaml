@@ -56,5 +56,57 @@ interface IXamlDiagnostics2 : IUnknown
         [out, size_is(, *pCount)] InstanceHandle** ppInstanceHandles);
 };
 
+// XAML hot reload.
+//
+// A diagnostics tool (the tap dll this XamlDiagnostics instance was sited on) can give the app new compiled markup
+// for its own components while it runs, hear when components load, and tell the runtime that types changed. The
+// tool then re-creates what it changed (for example, it navigates a Frame to the page again).
+//
+// Only apps built with the hot reload stamp allow it: the XAML build writes Microsoft.UI.Xaml.HotReload.enabled to
+// the app's output folder (and so its package root) for debug builds, or when the project sets
+// EnableXamlHotReload=true. Without the stamp, every method returns E_XAMLHOTRELOAD_NOTENABLED and nothing changes.
+
+cpp_quote("#define E_XAMLHOTRELOAD_NOTENABLED MAKE_HRESULT(SEVERITY_ERROR, FACILITY_XAML, 41L)")
+
+// IXamlComponentLoadedCallback: implemented by the tool. Called on the loading thread after every successful
+// Application.LoadComponent (which InitializeComponent calls). A failure it returns is ignored.
+[
+    object,
+    uuid(7AF94B54-7C75-42C3-B717-44F25C491A27),
+    pointer_default(unique)
+]
+interface IXamlComponentLoadedCallback : IUnknown
+{
+    HRESULT OnComponentLoaded(
+        [in] IInspectable* component,
+        [in, string] LPCWSTR uri);
+};
+
+// IXamlHotReloadService: implemented by WinUI 3's XamlDiagnostics instance; a tool gets it with QueryInterface.
+// Callable from any thread. Each UI thread picks up changes on its next load.
+[
+    object,
+    uuid(1DB88325-CDAB-4BB7-8964-38D9D29F80DB),
+    pointer_default(unique)
+]
+interface IXamlHotReloadService : IUnknown
+{
+    // Later loads of the component at uri read xbf instead of its built .xbf. uri is the component's markup URI as
+    // InitializeComponent passes it (ms-appx:///Views/MainPage.xaml) or its .xbf form; ms-resource:///Files/<path>
+    // is the same as ms-appx:///<path>. xbf is what the XAML compiler produces for the edited file, and is copied.
+    // WinUI's own markup is refused with E_INVALIDARG. Instances already loaded keep their content.
+    HRESULT SetComponentXbf(
+        [in, string] LPCWSTR uri,
+        [in] UINT32 size,
+        [in, size_is(size)] const BYTE* xbf);
+
+    HRESULT AdviseComponentLoaded(
+        [in] IXamlComponentLoadedCallback* callback,
+        [out] DWORD* cookie);
+
+    HRESULT UnadviseComponentLoaded(
+        [in] DWORD cookie);
+};
+
 cpp_quote("#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */ ")
 cpp_quote("#pragma endregion")

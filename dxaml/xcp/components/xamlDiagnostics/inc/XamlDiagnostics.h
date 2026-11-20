@@ -48,6 +48,7 @@ class
         // interfaces that derive from base interfaces. The class only implements the first one, so this
         // should always be the most derived, but will still be able to QI for the other classes in the list.
         wrl::ChainInterfaces<IVisualTreeService3, IVisualTreeService2, IVisualTreeService>,
+        IXamlHotReloadService,
         IXamlDiagnosticsTestHooks,
         wrl::FtmBase>
 {
@@ -236,6 +237,17 @@ public:
     // IXamlDiagnosticsPrivate Interface
     IFACEMETHOD(GetResourceSnapShot)(
         _Out_ XamlResourceSnapshot* snapshot) override;
+
+    // IXamlHotReloadService Interface (XamlDiagnosticsHotReload.cpp)
+    IFACEMETHOD(SetComponentXbf)(
+        _In_z_ LPCWSTR uri,
+        UINT32 size,
+        _In_reads_(size) const BYTE* xbf) override;
+    IFACEMETHOD(AdviseComponentLoaded)(
+        _In_ IXamlComponentLoadedCallback* callback,
+        _Out_ DWORD* cookie) override;
+    IFACEMETHOD(UnadviseComponentLoaded)(
+        DWORD cookie) override;
 
     // IXamlDiagnosticsTestHooks Interface
     IFACEMETHOD(UnregisterInstance)(\

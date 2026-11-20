@@ -37,6 +37,7 @@
         <ClCompile Include="..\ModernResourceProvider.cpp"/>
         <ClCompile Include="..\MRTResource.cpp"/>
         <ClCompile Include="..\FilePathResource.cpp"/>
+        <ClCompile Include="..\XamlHotReload.cpp"/>
     </ItemGroup>
 
     <ItemGroup>

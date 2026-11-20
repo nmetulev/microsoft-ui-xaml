@@ -27,6 +27,7 @@
 #include <Microsoft.Windows.ApplicationModel.Resources.h>
 #include "GamepadKeyRoutingLightup.h"
 #include <OptionalChangeState.h>
+#include <XamlHotReload.h>
 
 using namespace RuntimeFeatureBehavior;
 using namespace DirectUI;
@@ -549,6 +550,22 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
         IFCEXPECT_RETURN(pCoreDO);
     }
 
+    // XAML hot reload: a parse failure in earlier markup must not be reported again for this load (the parser wraps a
+    // converter failure with the error service's first recorded error).
+    {
+        static thread_local std::uint32_t s_markupGeneration = 0;
+        const std::uint32_t generation = XamlHotReload::g_markupGeneration.load(std::memory_order_relaxed);
+        if (generation != s_markupGeneration)
+        {
+            s_markupGeneration = generation;
+            IErrorService* errorService = nullptr;
+            if (SUCCEEDED(pCore->GetHandle()->getErrorService(&errorService)) && errorService)
+            {
+                errorService->CleanupErrors();
+            }
+        }
+    }
+
     HRESULT hr = CoreImports::Application_LoadComponent(
         pCore->GetHandle(),
         pCoreDO,
@@ -563,6 +580,8 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
     }
 
     IFC_RETURN(hr);
+
+    XamlHotReload::InvokeLoadCallbacks(pComponent, strUri.GetBuffer());
 
     // If the component was not pegged at got pegged during this call
     // then ensure that we restore the initial state.

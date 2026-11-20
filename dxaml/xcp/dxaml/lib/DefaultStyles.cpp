@@ -17,6 +17,7 @@
 #include "xcperrorresource.h"
 #include <wininet.h>
 #include <OptionalChangeState.h>
+#include <XamlHotReload.h>
 
 using namespace DirectUI;
 using namespace xaml_hosting;
@@ -542,6 +543,19 @@ _Check_return_ HRESULT StyleCache::GetStyles(
     }
 
     *ppStyles = NULL;
+
+    // XAML hot reload: once a component's .xbf was replaced, app and library themes/generic.xaml are loaded again.
+    // WinUI's own styles stay loaded.
+    {
+        const std::uint32_t generation = XamlHotReload::g_markupGeneration.load(std::memory_order_relaxed);
+        if (generation != m_hotReloadGeneration)
+        {
+            m_hotReloadGeneration = generation;
+            m_stylesMap.clear();
+            ctl::release_interface(m_pAppStyles);
+            m_fLoadedAppStyles = FALSE;
+        }
+    }
 
     // Styles can reference theme resources, so make sure it's loaded
     if (!m_fLoadedThemeXaml)

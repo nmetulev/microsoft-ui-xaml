@@ -65,6 +65,9 @@ public:
 
     void Flush();
 
+    // XAML hot reload: once a component's .xbf was replaced (on any thread), drops what this cache holds for it.
+    void ForgetReplacedComponents();
+
     // Clears the XBFv2 reader cache. This is distinct from Flush()
     // because we only want to do this if metadata was reset (which leads
     // to our cached readers holding onto stale type information).
@@ -126,6 +129,9 @@ private:
     containers::vector_map<const void*, std::shared_ptr<XamlBinaryFormatReader2>> m_XBFv2ReaderCache;
     std::vector<std::shared_ptr<XamlBinaryFormatReader2>> m_staleXBFv2Readers;
     std::vector<xref_ptr<IPALResource>> m_XbfResourceStorage;
+
+    // The XamlHotReload::g_markupGeneration this cache last saw.
+    std::uint32_t m_hotReloadGeneration = 0;
 };
 
 

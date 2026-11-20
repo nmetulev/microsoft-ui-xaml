@@ -11,6 +11,7 @@
 #include <MsResourceHelpers.h>
 #include <ParserAPI.h>
 #include <winuri.h>
+#include <XamlHotReload.h>
 
 using namespace Parser;
 
@@ -83,6 +84,28 @@ void XamlNodeStreamCacheManager::Flush()
     m_UriToXbfResourceMap.clear();
 }
 
+// Built .xbf files can't change while the app runs, so only replaced components are forgotten. Their replaced .xbf
+// stays in m_XbfResourceStorage like any other, which keeps XBFv2 reader cache keys (buffer addresses) unique.
+void XamlNodeStreamCacheManager::ForgetReplacedComponents()
+{
+    const std::uint32_t generation = XamlHotReload::g_markupGeneration.load(std::memory_order_relaxed);
+    if (generation == m_hotReloadGeneration)
+    {
+        return;
+    }
+    m_hotReloadGeneration = generation;
+
+    const auto forget = [](auto& map)
+    {
+        for (auto it = map.begin(); it != map.end();)
+        {
+            it = XamlHotReload::HasReplacedXbf(it->first.GetBuffer(), it->first.GetCount()) ? map.erase(it) : std::next(it);
+        }
+    };
+    forget(m_UriToXbfResourceMap);
+    forget(m_UriToNodelistMap);
+}
+
 // Clears the XBFv2 reader cache. This is distinct from Flush()
 // because we only want to do this if metadata was reset (which leads
 // to our cached readers holding onto stale type information).
@@ -132,6 +155,8 @@ XamlNodeStreamCacheManager::GetBinaryResourceForXamlUri(_In_ const xstring_ptr& 
     bool isNewResource = false;
 
     spXbfResourceOut = nullptr;
+
+    ForgetReplacedComponents();
 
     auto itXbfResource = m_UriToXbfResourceMap.find(strUri);
     if (itXbfResource == m_UriToXbfResourceMap.end())
@@ -462,6 +487,8 @@ XamlNodeStreamCacheManager::EnsureCacheEntry(
     _In_ const xstring_ptr& spUniqueName,
     std::shared_ptr<NodeStreamCacheEntry>& spNodeStreamCacheEntry)
 {
+    ForgetReplacedComponents();
+
     auto itNodeStreamCacheEntry = m_UriToNodelistMap.find(spUniqueName);
     if (itNodeStreamCacheEntry == m_UriToNodelistMap.end())
     {
