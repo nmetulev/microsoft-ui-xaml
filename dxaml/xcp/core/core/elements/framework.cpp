@@ -19,9 +19,16 @@
 #include "RootScale.h"
 #include "XamlTelemetry.h"
 #include <OptionalChangeState.h>
+#include <XamlHotReload.h>
 
 using namespace Theming;
 using namespace DirectUI;
+
+namespace
+{
+    // Set while InvalidateImplicitStyles looks every implicit style in a subtree up again (XAML hot reload only).
+    thread_local bool t_reevaluatingAllImplicitStyles = false;
+}
 
 CFrameworkElement::CFrameworkElement(_In_ CCoreServices *pCore)
     : CUIElement(pCore)
@@ -685,7 +692,7 @@ CFrameworkElement::UpdateImplicitStyle(
             auto runtimeEnabledFeatureDetector = RuntimeFeatureBehavior::GetRuntimeEnabledFeatureDetector();
 
             // XamlDiagnostics signals it modified the implicit style by passing in the same style as pOldStyle and pNewStyle.
-            const bool xamlDiagRefresh = bForceUpdate && (pOldStyle == pNewStyle) && runtimeEnabledFeatureDetector->IsFeatureEnabled(RuntimeFeatureBehavior::RuntimeEnabledFeature::XamlDiagnostics);
+            const bool xamlDiagRefresh = bForceUpdate && (pOldStyle == pNewStyle) && !t_reevaluatingAllImplicitStyles && runtimeEnabledFeatureDetector->IsFeatureEnabled(RuntimeFeatureBehavior::RuntimeEnabledFeature::XamlDiagnostics);
             if (!xamlDiagRefresh || pNewStyle)
             {
                 // pNewStyle may not be applicable to this item, but one of the children, so re-ensure this implicit style if the one
@@ -743,6 +750,13 @@ CFrameworkElement::InvalidateImplicitStyles(
         }
         else
         {
+            // XAML hot reload: this pass looks every implicit style up again, but its arguments are the ones
+            // XamlDiagnostics uses to unapply implicit styles (see UpdateImplicitStyle). Once hot reload replaced
+            // markup, say which one this is, so a dictionary replaced while a tool is attached doesn't strip the
+            // implicit styles of the whole subtree.
+            const bool wasReevaluating = t_reevaluatingAllImplicitStyles;
+            t_reevaluatingAllImplicitStyles = XamlHotReload::IsActive();
+            auto restore = wil::scope_exit([wasReevaluating]() { t_reevaluatingAllImplicitStyles = wasReevaluating; });
             IFC_RETURN(pElement->UpdateImplicitStyle(NULL, NULL, /*bForceUpdate*/TRUE));
         }
     }
