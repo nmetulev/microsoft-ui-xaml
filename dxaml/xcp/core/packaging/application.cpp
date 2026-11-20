@@ -12,6 +12,60 @@
 #include <DependencyLocator.h>
 #include <DesignMode.h>
 #include "XamlTelemetry.h"
+#include <DOPointerCast.h>
+#include <XamlHotReload.h>
+
+namespace
+{
+    // The dictionary a component's markup fills: its Resources (never created here), or the component itself.
+    CResourceDictionary* GetComponentDictionaryNoRef(_In_ CDependencyObject* component)
+    {
+        if (auto element = do_pointer_cast<CFrameworkElement>(component))
+        {
+            return element->GetResourcesNoCreateNoRef();
+        }
+        if (auto application = do_pointer_cast<CApplication>(component))
+        {
+            return application->m_pResources;
+        }
+        return do_pointer_cast<CResourceDictionary>(component);
+    }
+
+    KnownPropertyIndex GetComponentResourcesProperty(_In_ CDependencyObject* component)
+    {
+        return do_pointer_cast<CApplication>(component)
+            ? KnownPropertyIndex::Application_Resources
+            : KnownPropertyIndex::FrameworkElement_Resources;
+    }
+
+    // XAML hot reload: markup loaded again onto a live component starts from an empty dictionary, as a new instance
+    // would. Returns the dictionary to put back if the load fails.
+    _Check_return_ HRESULT ResetComponentDictionary(
+        _In_ CCoreServices* core,
+        _In_ CDependencyObject* component,
+        _Out_ xref_ptr<CResourceDictionary>* previous)
+    {
+        previous->reset();
+        CResourceDictionary* dictionary = GetComponentDictionaryNoRef(component);
+        if (!dictionary || !dictionary->IsFilledByComponentMarkup())
+        {
+            return S_OK;
+        }
+
+        if (dictionary == component)
+        {
+            // The component is the dictionary: it can only be emptied.
+            return dictionary->ResetForComponentReload();
+        }
+
+        xref_ptr<CDependencyObject> fresh;
+        CREATEPARAMETERS cp(core);
+        IFC_RETURN(CResourceDictionary::Create(fresh.ReleaseAndGetAddressOf(), &cp));
+        *previous = dictionary;
+        IFC_RETURN(component->SetValueByKnownIndex(GetComponentResourcesProperty(component), fresh.get()));
+        return S_OK;
+    }
+}
 
 //------------------------------------------------------------------------
 //
@@ -449,7 +503,25 @@ _Check_return_ HRESULT CApplication::LoadComponent(
         TraceLoggingWideString(strCanonicalUri.GetBuffer(), "Uri"),
         TraceLoggingLevel(WINEVENT_LEVEL_VERBOSE));
 
+    xref_ptr<CResourceDictionary> previousDictionary;
+    if (XamlHotReload::IsActive())
+    {
+        IFC_RETURN(ResetComponentDictionary(pCore, pComponent, &previousDictionary));
+    }
+    auto restoreDictionary = wil::scope_exit([&]()
+    {
+        if (previousDictionary)
+        {
+            IGNOREHR(pComponent->SetValueByKnownIndex(GetComponentResourcesProperty(pComponent), previousDictionary.get()));
+        }
+    });
+
     IFC_RETURN(pCore->ParseXamlWithExistingFrameworkRoot(buffer, pComponent, xstring_ptr(), strPhysicalResourceUri, expandTemplatesDuringParse, obj.ReleaseAndGetAddressOf()));
+    restoreDictionary.release();
+    if (CResourceDictionary* dictionary = GetComponentDictionaryNoRef(pComponent))
+    {
+        dictionary->MarkFilledByComponentMarkup();
+    }
     parsingGuard.release();
     TraceApplicationLoadComponentEnd();
 

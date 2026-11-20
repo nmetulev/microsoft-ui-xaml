@@ -59,6 +59,7 @@ CResourceDictionary::CResourceDictionary(_In_ CCoreServices* pCore)
     , m_isHighContrast(false)
     , m_useAppResourcesForThemeRef(false)
     , m_isGlobal(false)
+    , m_filledByComponentMarkup(false)
 #if DBG
     , m_processingBulkUndeferral(false)
 #endif
@@ -1139,6 +1140,24 @@ Cleanup:
     }
 
     return hr;
+}
+
+_Check_return_ HRESULT CResourceDictionary::ResetForComponentReload()
+{
+    IFC_RETURN(Clear());
+    // Counts keys undeferred from the table Clear dropped; the next load brings its own table.
+    m_undeferredKeyCount = 0;
+    m_pRuntimeDeferredKeys.reset();
+    if (m_pMergedDictionaries)
+    {
+        IFC_RETURN(m_pMergedDictionaries->Clear());
+    }
+    if (m_pThemeDictionaries)
+    {
+        IFC_RETURN(m_pThemeDictionaries->Clear());
+    }
+    InvalidateNotFoundCache(true);
+    return S_OK;
 }
 
 _Check_return_

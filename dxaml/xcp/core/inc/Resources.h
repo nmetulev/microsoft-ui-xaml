@@ -337,6 +337,13 @@ public:
 
     bool IsGlobal() const { return m_isGlobal; }
 
+    // XAML hot reload: a component's markup filled this dictionary (the component's Resources, or the component itself
+    // when it is a ResourceDictionary). Loading markup onto the same component again starts from an empty dictionary,
+    // because the parser adds to an existing one and the previous markup's resources would win or collide.
+    void MarkFilledByComponentMarkup() { m_filledByComponentMarkup = true; }
+    bool IsFilledByComponentMarkup() const { return m_filledByComponentMarkup; }
+    _Check_return_ HRESULT ResetForComponentReload();
+
     void SetUseAppResourcesForThemeRef(_In_ bool value)
     {
         m_useAppResourcesForThemeRef = value;
@@ -514,6 +521,7 @@ private:
     unsigned int m_isHighContrast              : 1;
     unsigned int m_useAppResourcesForThemeRef  : 1;
     unsigned int m_isGlobal                    : 1;
+    unsigned int m_filledByComponentMarkup     : 1; // See MarkFilledByComponentMarkup
 
     // m_pActiveThemeDictionary's theme
     Theming::Theme m_activeTheme               : 5;
