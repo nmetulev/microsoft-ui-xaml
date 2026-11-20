@@ -53,6 +53,16 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
             TEST_METHOD_PROPERTY(L"TestPass:MaxOSVer", WINDOWS_OS_VERSION_22H2) // This test is currently failing on 23h2.
         END_TEST_METHOD()
 
+        BEGIN_TEST_METHOD(CanRaiseTextChangedEventOnceAfterTemplateIsReapplied)
+            TEST_METHOD_PROPERTY(L"Description", L"Validates that a TextChanged event raises once per text change after the template is applied again.")
+            TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")
+        END_TEST_METHOD()
+
+        BEGIN_TEST_METHOD(CanReleaseWithPendingTextChangedAfterTemplateIsReapplied)
+            TEST_METHOD_PROPERTY(L"Description", L"Validates that releasing an AutoSuggestBox right after a text change, once its template was applied again, does not crash.")
+            TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")
+        END_TEST_METHOD()
+
         BEGIN_TEST_METHOD(ValidateTextBoxStyle)
             TEST_METHOD_PROPERTY(L"Description", L"Validates that we can successfully set the TextBoxStyle property.")
             TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")

@@ -280,6 +280,138 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
         flyoutClosedEvent->WaitForDefault();
     }
 
+    // Applies the AutoSuggestBox's template again, as happens when the app's resources or the control's Template change.
+    static void ReapplyTemplate(xaml_controls::AutoSuggestBox^ autoSuggestBox)
+    {
+        auto controlTemplate = autoSuggestBox->Template;
+        autoSuggestBox->Template = nullptr;
+        autoSuggestBox->UpdateLayout();
+        autoSuggestBox->Template = controlTemplate;
+        VERIFY_IS_TRUE(autoSuggestBox->ApplyTemplate());
+        autoSuggestBox->UpdateLayout();
+    }
+
+    void AutoSuggestBoxIntegrationTests::CanRaiseTextChangedEventOnceAfterTemplateIsReapplied()
+    {
+        TestCleanupWrapper cleanup;
+        DisableErrorReportingScopeGuard disableErrors;
+
+        xaml_controls::AutoSuggestBox^ autoSuggestBox = nullptr;
+        int textChangedCount = 0;
+        auto textChangedEvent = std::make_shared<Event>();
+        auto textChangedRegistration = CreateSafeEventRegistration(xaml_controls::AutoSuggestBox, TextChanged);
+
+        RunOnUIThread([&]()
+        {
+            autoSuggestBox = ref new xaml_controls::AutoSuggestBox();
+
+            textChangedRegistration.Attach(autoSuggestBox,
+                ref new wf::TypedEventHandler<xaml_controls::AutoSuggestBox^, xaml_controls::AutoSuggestBoxTextChangedEventArgs^>(
+                    [&](Platform::Object^, xaml_controls::AutoSuggestBoxTextChangedEventArgs^)
+            {
+                ++textChangedCount;
+                textChangedEvent->Set();
+            }));
+
+            TestServices::WindowHelper->WindowContent = autoSuggestBox;
+        });
+
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            LOG_OUTPUT(L"Applying the AutoSuggestBox's template a second time.");
+            ReapplyTemplate(autoSuggestBox);
+        });
+
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            textChangedCount = 0;
+            autoSuggestBox->Text = "Test String";
+        });
+
+        textChangedEvent->WaitForDefault();
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            LOG_OUTPUT(L"TextChanged was raised %d time(s).", textChangedCount);
+            VERIFY_ARE_EQUAL(1, textChangedCount);
+        });
+    }
+
+    void AutoSuggestBoxIntegrationTests::CanReleaseWithPendingTextChangedAfterTemplateIsReapplied()
+    {
+        TestCleanupWrapper cleanup;
+        DisableErrorReportingScopeGuard disableErrors;
+
+        xaml_controls::Grid^ root = nullptr;
+        xaml_controls::AutoSuggestBox^ autoSuggestBox = nullptr;
+        Platform::WeakReference autoSuggestBoxWeakRef;
+        auto releasedEvent = std::make_shared<Event>();
+        auto textBoxTextChangedRegistration = CreateSafeEventRegistration(xaml_controls::TextBox, TextChanged);
+
+        RunOnUIThread([&]()
+        {
+            autoSuggestBox = ref new xaml_controls::AutoSuggestBox();
+            autoSuggestBoxWeakRef = Platform::WeakReference(autoSuggestBox);
+
+            root = ref new xaml_controls::Grid();
+            root->Children->Append(autoSuggestBox);
+            TestServices::WindowHelper->WindowContent = root;
+        });
+
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            LOG_OUTPUT(L"Applying the AutoSuggestBox's template a second time.");
+            ReapplyTemplate(autoSuggestBox);
+        });
+
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            // The AutoSuggestBox handles its TextBox's TextChanged first, which starts its TextChanged timer.
+            // Release the AutoSuggestBox right after that, before the timer ticks.
+            auto textBox = safe_cast<xaml_controls::TextBox^>(TreeHelper::GetVisualChildByName(autoSuggestBox, L"TextBox"));
+            VERIFY_IS_NOT_NULL(textBox);
+
+            textBoxTextChangedRegistration.Attach(textBox,
+                ref new xaml_controls::TextChangedEventHandler(
+                    [&](Platform::Object^, xaml_controls::ITextChangedEventArgs^)
+            {
+                if (autoSuggestBox)
+                {
+                    LOG_OUTPUT(L"Releasing the AutoSuggestBox while its TextChanged timer is running.");
+                    root->Children->Clear();
+                    autoSuggestBox = nullptr;
+                    releasedEvent->Set();
+                }
+            }));
+
+            autoSuggestBox->Text = "Test String";
+        });
+
+        releasedEvent->WaitForDefault();
+
+        // Well past the TextChanged timer interval (150ms), so a timer left running has ticked by now.
+        Sleep(500);
+        TestServices::WindowHelper->WaitForIdle();
+
+        // GC Collect needed because WPF host has a managed ref to our object.
+        TestServices::WindowHelper->GCCollect();
+        TestServices::WindowHelper->WaitForIdle();
+
+        RunOnUIThread([&]()
+        {
+            VERIFY_IS_NULL(autoSuggestBoxWeakRef.Resolve<xaml_controls::AutoSuggestBox>());
+        });
+    }
+
     void AutoSuggestBoxIntegrationTests::ValidateTextBoxStyle()
     {
         TestCleanupWrapper cleanup;

@@ -70,6 +70,14 @@ AutoSuggestBox::AutoSuggestBox(){}
 
 AutoSuggestBox::~AutoSuggestBox()
 {
+    // A started timer is kept alive by the dispatcher, so stop it and detach our Tick handler before going away.
+    auto spTextChangedEventTimer = m_tpTextChangedEventTimer.GetSafeReference();
+    if (spTextChangedEventTimer)
+    {
+        IGNOREHR(spTextChangedEventTimer->Stop());
+        IGNOREHR(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(spTextChangedEventTimer.Get()));
+    }
+
     if (m_tpInputPane)
     {
         if (m_sipEvents[0].value != 0)
@@ -211,6 +219,14 @@ AutoSuggestBox::OnApplyTemplate()
     {
         IFC_RETURN(ClearTextBoxQueryButtonIcon());
         IFC_RETURN(m_epQueryButtonClickEventHandler.DetachEventHandler(m_tpTextBoxQueryButtonPart.Get()));
+    }
+
+    // The timer outlives the template and its Tick handler is attached again below. Without this, each additional
+    // template left the previous handler on the timer, raising TextChanged once per handler, and only the latest
+    // handler was neutered on destruction, so the others could call into a destroyed AutoSuggestBox.
+    if (m_tpTextChangedEventTimer)
+    {
+        IFC_RETURN(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(m_tpTextChangedEventTimer.Get()));
     }
 
     m_tpSuggestionsPart.Clear();
