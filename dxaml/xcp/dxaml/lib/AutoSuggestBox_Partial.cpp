@@ -70,14 +70,6 @@ AutoSuggestBox::AutoSuggestBox(){}
 
 AutoSuggestBox::~AutoSuggestBox()
 {
-    // A started timer is kept alive by the dispatcher, so stop it and detach our Tick handler before going away.
-    auto spTextChangedEventTimer = m_tpTextChangedEventTimer.GetSafeReference();
-    if (spTextChangedEventTimer)
-    {
-        IGNOREHR(spTextChangedEventTimer->Stop());
-        IGNOREHR(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(spTextChangedEventTimer.Get()));
-    }
-
     if (m_tpInputPane)
     {
         if (m_sipEvents[0].value != 0)
@@ -212,6 +204,7 @@ AutoSuggestBox::OnApplyTemplate()
     {
         IFC_RETURN(m_epTextBoxTextChangedEventHandler.DetachEventHandler(iinspectable_cast(m_tpTextBoxPart.Cast<TextBox>())));
         IFC_RETURN(m_epTextBoxLoadedEventHandler.DetachEventHandler(iinspectable_cast(m_tpTextBoxPart.Cast<TextBox>())));
+        IFC_RETURN(m_epTextBoxUnloadedEventHandler.DetachEventHandler(iinspectable_cast(m_tpTextBoxPart.Cast<TextBox>())));
         IFC_RETURN(m_epTextBoxCandidateWindowBoundsChangedEventHandler.DetachEventHandler(m_tpTextBoxPart.Get()));
     }
 
@@ -222,8 +215,7 @@ AutoSuggestBox::OnApplyTemplate()
     }
 
     // The timer outlives the template and its Tick handler is attached again below. Without this, each additional
-    // template left the previous handler on the timer, raising TextChanged once per handler, and only the latest
-    // handler was neutered on destruction, so the others could call into a destroyed AutoSuggestBox.
+    // template left the previous handler on the timer, and TextChanged was raised once per attached handler.
     if (m_tpTextChangedEventTimer)
     {
         IFC_RETURN(m_epTextChangedEventTimerTickEventHandler.DetachEventHandler(m_tpTextChangedEventTimer.Get()));

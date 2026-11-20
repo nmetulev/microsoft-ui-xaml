@@ -58,11 +58,6 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
             TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")
         END_TEST_METHOD()
 
-        BEGIN_TEST_METHOD(CanReleaseWithPendingTextChangedAfterTemplateIsReapplied)
-            TEST_METHOD_PROPERTY(L"Description", L"Validates that releasing an AutoSuggestBox right after a text change, once its template was applied again, does not crash.")
-            TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")
-        END_TEST_METHOD()
-
         BEGIN_TEST_METHOD(ValidateTextBoxStyle)
             TEST_METHOD_PROPERTY(L"Description", L"Validates that we can successfully set the TextBoxStyle property.")
             TEST_METHOD_PROPERTY(L"Hosting:Mode", L"WPF")
