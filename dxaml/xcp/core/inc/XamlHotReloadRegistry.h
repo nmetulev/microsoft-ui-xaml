@@ -3,8 +3,9 @@
 
 #pragma once
 
-// XAML hot reload bookkeeping that doesn't depend on the framework: which component URIs have replaced .xbf, and who
-// wants to hear about loads. Standard library only, so its rules can be unit tested without the rest of XAML.
+// XAML hot reload bookkeeping that doesn't depend on the framework: which component URIs have replaced .xbf, who
+// wants to hear about loads, and which root properties each load set. Standard library only, so its rules can be unit
+// tested without the rest of XAML.
 
 #include <algorithm>
 #include <cstdint>
@@ -207,5 +208,88 @@ namespace XamlHotReload
         mutable std::mutex m_lock;
         std::vector<std::pair<std::uint32_t, T>> m_items;
         std::uint32_t m_lastCookie = 0;
+    };
+
+    // Properties (KnownPropertyIndex values) the previous load set on a component's root that the latest load didn't
+    // set. A clean build of the latest markup wouldn't have them. Each is listed once, in the order of `previous`.
+    inline std::vector<std::uint16_t> RootPropertiesToClear(
+        const std::vector<std::uint16_t>& previous,
+        const std::vector<std::uint16_t>& latest)
+    {
+        std::vector<std::uint16_t> removed;
+        for (const auto property : previous)
+        {
+            if (std::find(latest.begin(), latest.end(), property) == latest.end() &&
+                std::find(removed.begin(), removed.end(), property) == removed.end())
+            {
+                removed.push_back(property);
+            }
+        }
+        return removed;
+    }
+
+    // The root properties each live component's last load set, so a later load of replaced markup can clear the ones
+    // it no longer sets. Components are identified by address, and a Weak reference tells whether the address still
+    // belongs to the same object. Entries are only checked on the component's own thread.
+    template <typename Weak>
+    class RootPropertyTable
+    {
+    public:
+        // Called on the component's thread after a successful load. Returns the root properties the previous load of
+        // this component recorded (empty the first time) and keeps `latest` for the next load. isAlive(const Weak&) is
+        // only called for entries of threadId.
+        template <typename IsAlive>
+        std::vector<std::uint16_t> Record(
+            const void* identity,
+            std::uint32_t threadId,
+            Weak ref,
+            std::vector<std::uint16_t> latest,
+            IsAlive&& isAlive)
+        {
+            std::lock_guard<std::mutex> guard(m_lock);
+
+            // Forget dead components of this thread now and then, so the table stays as large as what's alive.
+            if (m_entries.size() >= m_nextSweep)
+            {
+                for (auto it = m_entries.begin(); it != m_entries.end();)
+                {
+                    it = it->second.ThreadId == threadId && !isAlive(it->second.Ref) ? m_entries.erase(it) : std::next(it);
+                }
+                m_nextSweep = std::max<std::size_t>(c_minSweep, m_entries.size() * 2);
+            }
+
+            std::vector<std::uint16_t> previous;
+            auto it = m_entries.find(identity);
+            if (it != m_entries.end() && it->second.ThreadId == threadId && isAlive(it->second.Ref))
+            {
+                previous = std::move(it->second.RootProperties);
+                it->second.RootProperties = std::move(latest);
+                return previous;
+            }
+
+            // New, or a new object at a dead object's address: it doesn't inherit the old entry.
+            m_entries[identity] = Entry{ threadId, std::move(ref), std::move(latest) };
+            return previous;
+        }
+
+        std::size_t Size() const
+        {
+            std::lock_guard<std::mutex> guard(m_lock);
+            return m_entries.size();
+        }
+
+    private:
+        static constexpr std::size_t c_minSweep = 64;
+
+        struct Entry
+        {
+            std::uint32_t ThreadId = 0;
+            Weak Ref;
+            std::vector<std::uint16_t> RootProperties;
+        };
+
+        mutable std::mutex m_lock;
+        std::map<const void*, Entry> m_entries;   // keys are compared only, never dereferenced
+        std::size_t m_nextSweep = c_minSweep;
     };
 }

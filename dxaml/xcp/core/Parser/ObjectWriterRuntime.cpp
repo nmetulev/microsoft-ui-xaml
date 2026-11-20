@@ -16,6 +16,7 @@
 #include <DXamlServices.h>
 #include <dependencyLocator\inc\DependencyLocator.h>
 #include <diagnosticsInterop\inc\ResourceGraph.h>
+#include <XamlHotReload.h>
 
 using namespace DirectUI;
 
@@ -224,6 +225,17 @@ _Check_return_ HRESULT ObjectWriterRuntime::SetValueImpl(
         // Report a failed attempt to set a value
         IFC_RETURN(m_spErrorService->ReportSetValueError(xr, lineInfo, ssPropertyName, xstring_ptr::EmptyString()));
         IFC_RETURN(E_FAIL);
+    }
+
+    // XAML hot reload: the properties a component's markup sets on its root (see XamlHotReload::t_rootRecording).
+    if (auto recording = XamlHotReload::t_rootRecording)
+    {
+        const auto providerKind = spProperty->get_PropertyToken().GetProviderKind();
+        if ((providerKind == tpkNative || providerKind == tpkManaged) &&
+            spInstance->GetDependencyObject() == recording->Root)
+        {
+            recording->Properties->push_back(static_cast<std::uint16_t>(spProperty->get_PropertyToken().GetHandle()));
+        }
     }
 
     return S_OK;

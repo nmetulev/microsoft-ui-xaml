@@ -42,6 +42,16 @@ namespace XamlHotReload
         return probe != nullptr && probe(uri, count);
     }
 
+    // Set by Application.LoadComponent while it parses a component's markup, when hot reload is allowed: the parser
+    // adds the index (KnownPropertyIndex) of every property it sets on Root, so a later load of replaced markup can
+    // clear the ones it no longer sets.
+    struct RootPropertyRecording
+    {
+        const void* Root = nullptr;
+        std::vector<std::uint16_t>* Properties = nullptr;
+    };
+    inline thread_local RootPropertyRecording* t_rootRecording = nullptr;
+
     // True when the app carries the hot reload stamp (computed once).
     bool IsEnabledForApp();
 

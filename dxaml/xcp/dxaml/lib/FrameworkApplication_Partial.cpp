@@ -28,11 +28,61 @@
 #include "GamepadKeyRoutingLightup.h"
 #include <OptionalChangeState.h>
 #include <XamlHotReload.h>
+#include <XamlHotReloadRegistry.h>
 
 using namespace RuntimeFeatureBehavior;
 using namespace DirectUI;
 using namespace DirectUISynonyms;
 using DirectUI::Application;
+
+namespace
+{
+    // XAML hot reload: the properties each live component's last load set on its root.
+    using RootPropertyTable = XamlHotReload::RootPropertyTable<wrl::ComPtr<IWeakReference>>;
+
+    // Intentionally leaked so loads during process shutdown never touch a destroyed table.
+    RootPropertyTable& RootProperties()
+    {
+        static auto* table = new RootPropertyTable();
+        return *table;
+    }
+
+    // Remembers what this load set on the component's root. When replaced markup is loaded again onto the same
+    // component, the properties the previous load set and this one didn't go back to their defaults, as in a new
+    // instance. A failed load never gets here, so it clears nothing.
+    void ClearRemovedRootProperties(_In_ IInspectable* component, _In_ CDependencyObject* root, std::vector<std::uint16_t> latest)
+    {
+        wrl::ComPtr<IWeakReferenceSource> source;
+        wrl::ComPtr<IWeakReference> weak;
+        wrl::ComPtr<IUnknown> identity;
+        if (FAILED(component->QueryInterface(IID_PPV_ARGS(&source))) ||
+            FAILED(source->GetWeakReference(&weak)) ||
+            FAILED(component->QueryInterface(IID_PPV_ARGS(&identity))))
+        {
+            return;
+        }
+
+        const auto isAlive = [](const wrl::ComPtr<IWeakReference>& ref)
+        {
+            wrl::ComPtr<IInspectable> resolved;
+            return SUCCEEDED(ref->Resolve(__uuidof(IInspectable), resolved.GetAddressOf())) && resolved;
+        };
+        const std::vector<std::uint16_t> previous = RootProperties().Record(
+            identity.Get(), ::GetCurrentThreadId(), std::move(weak), latest, isAlive);
+
+        if (!XamlHotReload::IsActive())
+        {
+            return;
+        }
+        for (const auto index : XamlHotReload::RootPropertiesToClear(previous, latest))
+        {
+            if (const CDependencyProperty* property = MetadataAPI::GetPropertyByIndex(static_cast<KnownPropertyIndex>(index)))
+            {
+                IGNOREHR(root->ClearValue(property));
+            }
+        }
+    }
+}
 
 // A per-process FrameworkApplication instance, used for Application.Current. Xaml has a reference on this object.
 static FrameworkApplication* g_pApplication = NULL;
@@ -566,11 +616,23 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
         }
     }
 
+    // XAML hot reload: record the properties this markup sets on the component's root.
+    const bool recordRootProperties = XamlHotReload::IsAllowed();
+    std::vector<std::uint16_t> rootProperties;
+    XamlHotReload::RootPropertyRecording recording{ pCoreDO, &rootProperties };
+    XamlHotReload::RootPropertyRecording* const outerRecording = XamlHotReload::t_rootRecording;
+    if (recordRootProperties)
+    {
+        XamlHotReload::t_rootRecording = &recording;
+    }
+
     HRESULT hr = CoreImports::Application_LoadComponent(
         pCore->GetHandle(),
         pCoreDO,
         strUri,
         static_cast<::ComponentResourceLocation>(resourceLocation));
+
+    XamlHotReload::t_rootRecording = outerRecording;
 
     if (FAILED(hr))
     {
@@ -581,6 +643,10 @@ _Check_return_ HRESULT FrameworkApplication::LoadComponent(
 
     IFC_RETURN(hr);
 
+    if (recordRootProperties)
+    {
+        ClearRemovedRootProperties(pComponent, pCoreDO, std::move(rootProperties));
+    }
     XamlHotReload::InvokeLoadCallbacks(pComponent, strUri.GetBuffer());
 
     // If the component was not pegged at got pegged during this call
