@@ -95,5 +95,8 @@ protected:
     // reflection in cases where we have to look up a type by multiple names
     // (e.g.: Foo/FooExtension for MarkupExtension).
     containers::vector_set<xstring_ptr> m_mapKnownNotFoundTypes;
+
+    // The XamlHotReload::g_typeCacheGeneration m_mapKnownNotFoundTypes was filled under.
+    std::uint32_t m_knownNotFoundTypeGeneration = 0;
 };
 

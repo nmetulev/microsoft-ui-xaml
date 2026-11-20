@@ -53,9 +53,11 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
 
             Microsoft::WRL::ComPtr<MockXamlType> WithFullName(wrl_wrappers::HString fullName)
             {
-                GetFullNameCallback = [&fullName](HSTRING* value) -> HRESULT
+                UINT32 length = 0;
+                const wchar_t* buffer = WindowsGetStringRawBuffer(fullName.Get(), &length);
+                GetFullNameCallback = [name = std::wstring(buffer, length)](HSTRING* value) -> HRESULT
                 {
-                    return fullName.CopyTo(value);
+                    return WindowsCreateString(name.c_str(), static_cast<UINT32>(name.size()), value);
                 };
                 return this;
             }
@@ -202,6 +204,10 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
 
             IFACEMETHODIMP GetMember(_In_ HSTRING name, _Outptr_ xaml_markup::IXamlMember** xamlMember)
             {
+                if (GetMemberCallback != nullptr)
+                {
+                    return GetMemberCallback(name, xamlMember);
+                }
                 return E_NOTIMPL;
             }
 
@@ -230,6 +236,7 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
             std::function<HRESULT(BOOLEAN*)> GetIsBindableCallback;
             std::function<HRESULT(wxaml_interop::TypeName*)> GetUnderlyingTypeCallback;
             std::function<HRESULT()> RunInitializerCallback;
+            std::function<HRESULT(HSTRING, xaml_markup::IXamlMember**)> GetMemberCallback;
         };
 
     }

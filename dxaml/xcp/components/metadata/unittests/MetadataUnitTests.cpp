@@ -632,4 +632,95 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests { namespac
             VERIFY_ARE_EQUAL(builtInProperty, prop);
         }
     }
+
+    void MetadataUnitTests::InvalidateCustomTypeCachesForgetsUnresolvedTypes()
+    {
+        wrl_wrappers::HStringReference addedTypeName(L"CustomNamespace.AddedType");
+        auto addedType = MockXamlType::CreateMetadata(addedTypeName.Get())
+            ->WithBaseType(KnownTypeIndex::Object);
+
+        bool typeExists = false;
+        MockXamlMetadataProvider provider;
+        provider.GetXamlTypeByFullNameCallback = [&](HSTRING fullName, IXamlType** ppXamlType) -> HRESULT
+        {
+            if (typeExists && fullName == addedTypeName)
+            {
+                return addedType.CopyTo(ppXamlType);
+            }
+
+            *ppXamlType = nullptr;
+            return S_OK;
+        };
+
+        wxaml_interop::TypeName typeName = { addedTypeName.Get(), wxaml_interop::TypeKind_Metadata };
+        const CClassInfo* unresolved = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(typeName, &unresolved));
+        VERIFY_IS_NULL(unresolved->AsCustomType()->GetXamlTypeNoRef());
+
+        // The type is added while the app runs: the earlier miss is still cached until the tool says types changed.
+        typeExists = true;
+        const CClassInfo* resolved = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(typeName, &resolved));
+        VERIFY_ARE_EQUAL(unresolved, resolved);
+
+        MetadataAPI::InvalidateCustomTypeCaches();
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(typeName, &resolved));
+        VERIFY_ARE_NOT_EQUAL(unresolved, resolved);
+        VERIFY_ARE_EQUAL(addedType.Get(), resolved->AsCustomType()->GetXamlTypeNoRef());
+    }
+
+    void MetadataUnitTests::InvalidateCustomTypeCachesRefreshesChangedTypes()
+    {
+        wrl_wrappers::HStringReference typeName(L"CustomNamespace.ChangedType");
+        DECLARE_CONST_STRING_IN_TEST_CODE(c_addedMemberName, L"AddedMember");
+        IXamlMemberTypeMayReturnNull_XamlMember addedMember;
+
+        auto before = MockXamlType::CreateMetadata(typeName.Get())->WithBaseType(KnownTypeIndex::Object);
+        before->GetMemberCallback = [](HSTRING, IXamlMember** ppMember) -> HRESULT
+        {
+            *ppMember = nullptr;
+            return S_OK;
+        };
+        auto after = MockXamlType::CreateMetadata(typeName.Get())->WithBaseType(KnownTypeIndex::Object);
+        after->GetMemberCallback = [&addedMember](HSTRING, IXamlMember** ppMember) -> HRESULT
+        {
+            *ppMember = &addedMember;
+            return S_OK;
+        };
+
+        Microsoft::WRL::ComPtr<MockXamlType> current = before;
+        MockXamlMetadataProvider provider;
+        provider.GetXamlTypeByFullNameCallback = [&](HSTRING fullName, IXamlType** ppXamlType) -> HRESULT
+        {
+            if (fullName == typeName)
+            {
+                return current.CopyTo(ppXamlType);
+            }
+
+            *ppXamlType = nullptr;
+            return S_OK;
+        };
+
+        wxaml_interop::TypeName name = { typeName.Get(), wxaml_interop::TypeKind_Metadata };
+        const CClassInfo* type = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(name, &type));
+
+        const CDependencyProperty* property = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetPropertyByName(type, c_addedMemberName, &property));
+        VERIFY_IS_NULL(property);
+
+        // .NET hot reload adds the member: the type's first description doesn't have it until the tool says types changed.
+        current = after;
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetPropertyByName(type, c_addedMemberName, &property));
+        VERIFY_IS_NULL(property);
+
+        MetadataAPI::InvalidateCustomTypeCaches();
+        VERIFY_SUCCEEDED(MetadataAPI::TryGetPropertyByName(type, c_addedMemberName, &property));
+        VERIFY_IS_NOT_NULL(property);
+
+        const CClassInfo* sameType = nullptr;
+        VERIFY_SUCCEEDED(MetadataAPI::GetClassInfoByTypeName(name, &sameType));
+        VERIFY_ARE_EQUAL(type, sameType);
+        VERIFY_ARE_EQUAL(static_cast<IXamlType*>(after.Get()), type->AsCustomType()->GetXamlTypeNoRef());
+    }
 } } } } }

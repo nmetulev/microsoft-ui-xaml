@@ -15,6 +15,7 @@
 #include "MetadataAPI.h"
 #include <XStringUtils.h>
 #include <XStringBuilder.h>
+#include <XamlHotReload.h>
 
 using namespace Parser;
 
@@ -622,6 +623,14 @@ _Check_return_ HRESULT XamlSchemaContext::GetXamlProperty(
     }
 
     {
+        // XAML hot reload: a property cached as unknown may exist now.
+        const std::uint32_t typeGeneration = XamlHotReload::g_typeCacheGeneration.load(std::memory_order_relaxed);
+        if (typeGeneration != m_fullyQualifiedPropertyGeneration)
+        {
+            m_fullyQualifiedPropertyGeneration = typeGeneration;
+            m_mapFullyQualifiedProperty.clear();
+        }
+
         auto itXamlProperty = m_mapFullyQualifiedProperty.find(spFullyQualifiedPropertyName);
         if (itXamlProperty == m_mapFullyQualifiedProperty.end())
         {

@@ -46,6 +46,48 @@ public:
         m_spXamlType = nullptr;
     }
 
+    // XAML hot reload: an entry MetadataAPI::ImportUnknownClassInfo made because no provider knew the name, i.e. a
+    // cached "not found". These are the names forgotten when a tool says types changed.
+    bool IsUnresolved() const
+    {
+        return m_isUnresolved;
+    }
+
+    void MarkUnresolved()
+    {
+        m_isUnresolved = true;
+    }
+
+    // XAML hot reload: the type's code may have changed (new members). The next member lookup that finds nothing asks
+    // the metadata provider for the type again (MetadataAPI::RefreshChangedCustomType).
+    void MarkChanged()
+    {
+        m_changed = true;
+    }
+
+    bool IsChanged() const
+    {
+        return m_changed;
+    }
+
+    // Swaps in the provider's current description of this type, and returns the previous one, which the caller keeps
+    // alive because GetXamlTypeNoRef callers don't hold a reference. A null xamlType keeps the current one.
+    ctl::ComPtr<xaml_markup::IXamlType> ReplaceXamlType(_In_opt_ xaml_markup::IXamlType* xamlType)
+    {
+        m_changed = false;
+        ctl::ComPtr<xaml_markup::IXamlType> previous = m_spXamlType;
+        if (xamlType != nullptr)
+        {
+            m_spXamlType = xamlType;
+        }
+        return previous;
+    }
+
+    const xstring_ptr& GetFullNameStorage() const
+    {
+        return m_strFullName;
+    }
+
 private:
     CCustomClassInfo() = default;
 
@@ -56,4 +98,6 @@ private:
     KnownTypeIndex                                          m_boxedTypeIndex;
     KnownNamespaceIndex                                     m_nNamespaceIndex;
     bool                                                    m_isBindable{};
+    bool                                                    m_isUnresolved{};
+    bool                                                    m_changed{};
 };

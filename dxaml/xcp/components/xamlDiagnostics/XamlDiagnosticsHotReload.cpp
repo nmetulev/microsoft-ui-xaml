@@ -6,6 +6,7 @@
 
 #include "precomp.h"
 #include "XamlDiagnostics.h"
+#include "MetadataAPI.h"
 #include <RuntimeEnabledFeatures.h>
 #include <XamlHotReload.h>
 #include <XamlHotReloadRegistry.h>
@@ -104,5 +105,13 @@ IFACEMETHODIMP XamlDiagnostics::UnadviseComponentLoaded(DWORD cookie)
         return E_INVALIDARG;
     }
     s_hasListeners.store(!Listeners().Empty(), std::memory_order_release);
+    return S_OK;
+}
+
+IFACEMETHODIMP XamlDiagnostics::InvalidateTypeCaches()
+{
+    IFC_RETURN(EnsureAllowed());
+    DirectUI::MetadataAPI::InvalidateCustomTypeCaches();
+    XamlHotReload::g_typeCacheGeneration.fetch_add(1);
     return S_OK;
 }

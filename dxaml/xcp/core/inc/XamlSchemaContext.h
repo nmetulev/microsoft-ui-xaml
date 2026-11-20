@@ -343,6 +343,9 @@ private:
     // map to cache repeatedly referenced fully-qualifed property names.
     containers::vector_map<xstring_ptr, std::shared_ptr<XamlProperty>>  m_mapFullyQualifiedProperty;
 
+    // The XamlHotReload::g_typeCacheGeneration m_mapFullyQualifiedProperty was filled under.
+    std::uint32_t m_fullyQualifiedPropertyGeneration = 0;
+
     // caches for UnknownTypes/Properties we create when a requested StableXbfIndex is
     // outside the range of indices known to this version of the framework
     containers::vector_map<std::underlying_type<Parser::StableXbfTypeIndex>::type, std::shared_ptr<XamlType>> m_unknownStableXbfTypeIndexes;

@@ -863,6 +863,7 @@ _Check_return_ HRESULT MetadataAPI::ImportUnknownClassInfo(_In_ const wxaml_inte
             &pType));
 
         // Add the type to the runtime type caches.
+        pType->MarkUnresolved();
         VERIFY_COND(storage->m_customTypesByCustomNameCache.insert({ strTypeFullName, pType }), .second);
 
         storage->m_customTypesCache.emplace_back(pType);
@@ -899,6 +900,7 @@ _Check_return_ HRESULT MetadataAPI::ImportUnknownClassInfo(_In_ const wxaml_inte
             &pType));
 
         // Add the type to the runtime type caches.
+        pType->MarkUnresolved();
         VERIFY_COND(storage->m_customTypesByNameCache.insert({ strTypeFullName, pType }), .second);
 
         storage->m_customTypesCache.emplace_back(pType);
@@ -1010,6 +1012,61 @@ void MetadataAPI::OverrideMetadataProvider(_In_opt_ xaml_markup::IXamlMetadataPr
     DynamicMetadataStorageInstanceWithLock storage;
     storage->m_overriddenMetadataProvider = pMetadataProvider;
     storage->m_metadataProvider = nullptr;
+}
+
+void MetadataAPI::InvalidateCustomTypeCaches()
+{
+    DynamicMetadataStorageInstanceWithLock storage;
+
+    // Unresolved entries stay in m_customTypesCache: KnownTypeIndex values are indices into it, and properties
+    // registered against an unresolved type refer to it.
+    const auto forgetUnresolved = [](containers::vector_map<xstring_ptr, const CClassInfo*>& cache)
+    {
+        for (auto it = cache.begin(); it != cache.end();)
+        {
+            const CCustomClassInfo* type = it->second->AsCustomType();
+            it = type != nullptr && type->IsUnresolved() ? cache.erase(it) : std::next(it);
+        }
+    };
+    forgetUnresolved(storage->m_customTypesByNameCache);
+    forgetUnresolved(storage->m_customTypesByCustomNameCache);
+
+    for (const auto& type : storage->m_customTypesCache)
+    {
+        if (!type->IsUnresolved() && type->GetXamlTypeNoRef() != nullptr)
+        {
+            type->MarkChanged();
+        }
+    }
+}
+
+_Check_return_ HRESULT MetadataAPI::RefreshChangedCustomType(_In_ const CClassInfo* pType)
+{
+    auto customType = const_cast<CCustomClassInfo*>(pType->AsCustomType());
+    if (customType == nullptr || !customType->IsChanged())
+    {
+        return S_OK;
+    }
+
+    // Ask by full name, which every provider answers. No new entry is made: the type keeps its index and properties.
+    xruntime_string_ptr fullName;
+    IFC_RETURN(customType->GetFullNameStorage().Promote(&fullName));
+
+    ctl::ComPtr<xaml_markup::IXamlMetadataProvider> provider;
+    ctl::ComPtr<xaml_markup::IXamlType> current;
+    IFC_RETURN(TryGetMetadataProvider(&provider));
+    if (provider != nullptr)
+    {
+        IGNOREHR(provider->GetXamlTypeByFullName(fullName.GetHSTRING(), &current));
+    }
+
+    DynamicMetadataStorageInstanceWithLock storage;
+    auto previous = customType->ReplaceXamlType(current.Get());
+    if (current != nullptr && previous != nullptr && previous.Get() != current.Get())
+    {
+        storage->m_retiredXamlTypes.push_back(std::move(previous));
+    }
+    return S_OK;
 }
 
 // Processes the queued DP registrations.
@@ -1382,6 +1439,9 @@ _Check_return_ HRESULT MetadataAPI::TryImportPropertyInfoFromMetadataProvider(_I
     *ppProperty = nullptr;
 
     IFCEXPECT_RETURN(!pType->IsBuiltinType());
+
+    // XAML hot reload: a type whose code changed is asked for again, so members added to it are found.
+    IFC_RETURN(RefreshChangedCustomType(pType));
 
     // Make sure we were able to resolve this as a custom type.
     const CCustomClassInfo* customType = pType->AsCustomType();

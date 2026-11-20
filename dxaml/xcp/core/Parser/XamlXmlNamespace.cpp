@@ -3,6 +3,7 @@
 
 #include "precomp.h"
 #include "xamlxmlnamespace.h"
+#include <XamlHotReload.h>
 
 _Check_return_ HRESULT 
 XamlXmlNamespace::AddTypeNamespace(const std::shared_ptr<XamlTypeNamespace> inTypeNamespace)
@@ -79,6 +80,14 @@ XamlXmlNamespace::GetXamlTypeImpl(
     auto itXamlType = m_mapNameToXamlType.find(inTypeName);
     if (itXamlType == m_mapNameToXamlType.end())
     {
+        // XAML hot reload: types may have been added since these misses were recorded.
+        const std::uint32_t typeGeneration = XamlHotReload::g_typeCacheGeneration.load(std::memory_order_relaxed);
+        if (typeGeneration != m_knownNotFoundTypeGeneration)
+        {
+            m_knownNotFoundTypeGeneration = typeGeneration;
+            m_mapKnownNotFoundTypes.clear();
+        }
+
         if (m_mapKnownNotFoundTypes.find(inTypeName) == m_mapKnownNotFoundTypes.end())
         {
             for (auto typeNamespace : m_typeNamespaceList)

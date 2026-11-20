@@ -23,6 +23,9 @@ namespace XamlHotReload
     // Bumped by every replaced .xbf.
     inline std::atomic<std::uint32_t> g_markupGeneration{ 0 };
 
+    // Bumped when the tool says types changed (new types, or new members on types already used).
+    inline std::atomic<std::uint32_t> g_typeCacheGeneration{ 0 };
+
     // Set when the first .xbf is replaced: whether a component URI (.xaml or .xbf) has a replaced .xbf.
     using ReplacedXbfProbe = bool (*)(const wchar_t* uri, std::size_t count);
     inline std::atomic<ReplacedXbfProbe> g_replacedXbfProbe{ nullptr };

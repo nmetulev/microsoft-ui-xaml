@@ -248,6 +248,7 @@ public:
         _Out_ DWORD* cookie) override;
     IFACEMETHOD(UnadviseComponentLoaded)(
         DWORD cookie) override;
+    IFACEMETHOD(InvalidateTypeCaches)() override;
 
     // IXamlDiagnosticsTestHooks Interface
     IFACEMETHOD(UnregisterInstance)(\

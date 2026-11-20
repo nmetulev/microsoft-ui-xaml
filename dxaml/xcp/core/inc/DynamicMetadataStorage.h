@@ -137,6 +137,10 @@ namespace DirectUI
         // Overridden metadata provider. This primarily exists to load and unload providers for unit tests.
         ctl::ComPtr<xaml_markup::IXamlMetadataProvider> m_overriddenMetadataProvider;
 
+        // XAML hot reload: type descriptions replaced by a provider's current ones (MetadataAPI::RefreshChangedCustomType).
+        // Kept until reset because GetXamlTypeNoRef callers don't hold a reference.
+        std::vector<ctl::ComPtr<xaml_markup::IXamlType>>            m_retiredXamlTypes;
+
         GenerationBoundary m_valid = {};
     };
 

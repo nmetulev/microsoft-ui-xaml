@@ -61,6 +61,14 @@ namespace Microsoft { namespace UI { namespace Xaml { namespace Tests {
             END_TEST_METHOD()
 
             TEST_METHOD(TestPropertyGetters)
+
+            BEGIN_TEST_METHOD(InvalidateCustomTypeCachesForgetsUnresolvedTypes)
+                TEST_METHOD_PROPERTY(L"Description", L"XAML hot reload: a name that didn't resolve resolves once the app's types changed.")
+            END_TEST_METHOD()
+
+            BEGIN_TEST_METHOD(InvalidateCustomTypeCachesRefreshesChangedTypes)
+                TEST_METHOD_PROPERTY(L"Description", L"XAML hot reload: a member added to a type already used is found, and the type keeps its identity.")
+            END_TEST_METHOD()
         };
     }
 } } } }

@@ -106,6 +106,12 @@ interface IXamlHotReloadService : IUnknown
 
     HRESULT UnadviseComponentLoaded(
         [in] DWORD cookie);
+
+    // The app's types changed while it runs (for example, through .NET hot reload): new types may exist, and types
+    // already used may have new members. Earlier "not found" answers are forgotten, and each custom type is asked
+    // for again from its metadata provider the next time a member lookup on it finds nothing. Types keep their
+    // identity, so live objects, styles and bindings that use them keep working.
+    HRESULT InvalidateTypeCaches();
 };
 
 cpp_quote("#endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */ ")

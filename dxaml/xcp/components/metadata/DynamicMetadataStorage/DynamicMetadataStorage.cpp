@@ -80,6 +80,7 @@ void DynamicMetadataStorage::ResetInstance()
     {
         m_customTypesCache[index]->Invalidate();
     }
+    m_retiredXamlTypes.clear();
 
     // Reset providers.
 

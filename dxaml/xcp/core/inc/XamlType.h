@@ -6,6 +6,7 @@
 #include "IXamlSchemaObject.h"
 #include "TypeBits.h"
 #include "XamlTypeTokens.h"
+#include <XamlHotReload.h>
 
 class XamlSchemaContext;
 class XamlNamespace;
@@ -145,8 +146,30 @@ private:
     HRESULT GetBoolTypeBit(BoolTypeBits fTypeBit, bool& bValue);
     HRESULT RetrieveBoolTypeBits(const XamlBitSet<BoolTypeBits>& fTypeBits);
 
+    // XAML hot reload: once types changed (XamlHotReload::g_typeCacheGeneration), properties this type didn't have
+    // may exist now, so cached misses are forgotten. Properties found keep their identity.
+    void ForgetMissesIfTypesChanged()
+    {
+        const std::uint32_t generation = XamlHotReload::g_typeCacheGeneration.load(std::memory_order_relaxed);
+        if (generation != m_typeCacheGeneration)
+        {
+            m_typeCacheGeneration = generation;
+            ForgetMisses(m_PropertyCache);
+            ForgetMisses(m_DependencyPropertyCache);
+        }
+    }
+
+    static void ForgetMisses(containers::vector_map<xstring_ptr, XamlPropertyAndTypeToken>& cache)
+    {
+        for (auto it = cache.begin(); it != cache.end();)
+        {
+            it = it->second.m_tpProperty.IsUnknown() ? cache.erase(it) : std::next(it);
+        }
+    }
+
     HRESULT TryGetPropertyFromCache(_In_ const xstring_ptr& inPropertyName, XamlPropertyAndTypeToken& tPropertyAndType)
     {
+        ForgetMissesIfTypesChanged();
         auto itPropertyAndType = m_PropertyCache.find(inPropertyName);
         if (itPropertyAndType == m_PropertyCache.end())
         {
@@ -172,6 +195,7 @@ private:
 
     HRESULT TryGetDependencyPropertyFromCache(_In_ const xstring_ptr& inPropertyName, XamlPropertyAndTypeToken& tPropertyAndType)
     {
+        ForgetMissesIfTypesChanged();
         auto itPropertyAndType = m_DependencyPropertyCache.find(inPropertyName);
         if (itPropertyAndType == m_DependencyPropertyCache.end())
         {
@@ -221,6 +245,7 @@ private:
     
     static const size_t invalidIndex = static_cast<size_t>(-1);
     size_t m_uiRuntimeIndex = invalidIndex;
+    std::uint32_t m_typeCacheGeneration = XamlHotReload::g_typeCacheGeneration.load(std::memory_order_relaxed);
 };
 
 class KnownXamlType 

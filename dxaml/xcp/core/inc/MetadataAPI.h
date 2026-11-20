@@ -313,6 +313,12 @@ namespace DirectUI
         static void OverrideMetadataProvider(
             _In_opt_ xaml_markup::IXamlMetadataProvider* pMetadataProvider);
 
+        // XAML hot reload: the app's types changed while it runs. Forgets custom type names that didn't resolve, so they
+        // are asked for again, and marks every resolved custom type so the next member lookup on it that finds nothing
+        // asks its provider for the type again (RefreshChangedCustomType). Resolved types keep their entry, index and
+        // properties, so live objects, styles and bindings that use them keep working.
+        static void InvalidateCustomTypeCaches();
+
         #pragma endregion
 
         #pragma region Index checks
@@ -451,6 +457,9 @@ namespace DirectUI
 
         // Tries to resolve a property via the IXamlMetadataProvider and adds it to the runtime type cache.
         static _Check_return_ HRESULT TryImportPropertyInfoFromMetadataProvider(_In_ const CClassInfo* pType, _In_ const xstring_ptr_view& strName, _Outptr_ const CDependencyProperty** ppProperty);
+
+        // XAML hot reload: when pType was marked changed (InvalidateCustomTypeCaches), swaps in its provider's current IXamlType.
+        static _Check_return_ HRESULT RefreshChangedCustomType(_In_ const CClassInfo* pType);
 
         static bool CompareCustomTypesHelper(const CClassInfo* typeClass, KnownTypeIndex targetType);
     };
