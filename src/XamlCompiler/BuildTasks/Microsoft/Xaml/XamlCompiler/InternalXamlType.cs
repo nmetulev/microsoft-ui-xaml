@@ -51,6 +51,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             set { Debug.Assert(_typeIndex == -1); _typeIndex = value; }
         }
 
+        // EnableXamlHotReloadCodegen: the compiler service keeps the types in the order the app has (KeepTypeOrder).
+        internal void MoveTo(int typeIndex)
+        {
+            _typeIndex = typeIndex;
+        }
+
         public bool IsValueType { get; set; }
 
         public String RefHat

@@ -6,7 +6,9 @@ namespace XAMLCompiler.BuildTasks.Core {
     export const core: SourceFile[] = [
         f`ClassCodeGenFile.cs`,
         f`CompileXamlInternal.cs`,
+        f`KeptMembers.cs`,
         f`XamlCompilerService.cs`,
+        f`XamlHotReloadHistory.cs`,
         f`ExperimentalFeatures.cs`,
         f`Helpers.cs`,
         f`Item.cs`,
@@ -194,6 +196,7 @@ namespace XAMLCompiler.BuildTasks.Core {
         f`Microsoft/Xaml/XamlCompiler/XamlCodeGenerator.cs`,
         f`Microsoft/Xaml/XamlCompiler/CompileError.cs`,
         f`Microsoft/Xaml/XamlCompiler/ConnectionIdElement.cs`,
+        f`Microsoft/Xaml/XamlCompiler/ConnectionIdKeys.cs`,
         f`Microsoft/Xaml/XamlCompiler/EventAssignment.cs`,
         f`Microsoft/Xaml/XamlCompiler/FieldDefinition.cs`,
         f`Microsoft/Xaml/XamlCompiler/KnownStrings.cs`,

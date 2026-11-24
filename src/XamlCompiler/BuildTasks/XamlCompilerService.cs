@@ -23,6 +23,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private readonly string _buildOutputFolder;
         private readonly string _outputFolder;
         private readonly SavedStateManager _savedState;
+        private readonly XamlHotReloadHistory _history;
 
         // The types and members in the app's XamlTypeInfo. Null until a pass 2 has read every page.
         private HashSet<string> _typeInfo;
@@ -48,6 +49,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             _outputFolder = Path.GetFullPath(outputFolder);
             // The build's saved state, kept in memory: the service never writes it.
             _savedState = SavedStateManager.Load(Path.Combine(_projectFolder, buildInputs.SavedStateFile ?? string.Empty));
+            if (buildInputs.EnableXamlHotReloadCodegen && buildInputs.Language == ProgrammingLanguage.CSharp)
+            {
+                _history = new XamlHotReloadHistory(_buildOutputFolder);
+            }
         }
 
         // Compiles the given XAML files (paths relative to the project, or full) the way the build's pass 1 or pass 2
@@ -143,6 +148,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 core.ServiceFiles = generateTypeInfo ? AllXamlFiles() : files;
                 core.ServiceCollectsAllTypeInfo = generateTypeInfo;
                 core.ServiceLocalAssemblyImage = localAssemblyImage;
+                core.ServiceHistory = _history;
                 result.Success = core.DoExecute() && !result.Diagnostics.Any(d => d.Type == MSBuildLogEntry.EntryType.Error);
                 if (result.Success && !isPass1)
                 {
@@ -176,7 +182,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     result.Xbf[buildPath] = File.ReadAllBytes(path);
                     continue;
                 }
-                result.Files[buildPath] = File.ReadAllText(path);
+                string text = File.ReadAllText(path);
+                if (result.Success && _history != null && path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                {
+                    text = KeptMembers.AddRemovedMembers(_history.GeneratedText(buildPath), text);
+                    _history.SetGeneratedText(buildPath, text);
+                }
+                result.Files[buildPath] = text;
             }
             return result;
         }

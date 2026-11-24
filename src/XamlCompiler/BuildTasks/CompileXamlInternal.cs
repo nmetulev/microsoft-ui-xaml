@@ -200,6 +200,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // emit); null reads LocalAssembly.
         internal byte[] ServiceLocalAssemblyImage { get; set; }
 
+        // Compiler service with EnableXamlHotReloadCodegen: connection IDs and the XamlTypeInfo order carried over from the
+        // build and earlier compiles.
+        internal XamlHotReloadHistory ServiceHistory { get; set; }
+
         // The project's assembly in the compiler service's type universe, replaced on every compile.
         private static Assembly s_serviceLocalAssembly;
 
@@ -895,11 +899,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 SourceFileManager.MarkApplicationFilesDirty();
             }
+            // A build whose hot reload state doesn't match EnableXamlHotReloadCodegen (it was just turned on or off)
+            // regenerates every page.
+            bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild &&
+                IsHotReloadCodegen != Directory.Exists(XamlHotReloadHistory.FolderOf(OutputFolderFullpath));
 
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
 
-            if (!IsServiceCompile && (xamlTypeInfoNeeded == false) && (didAssembliesChange == false) && (didFeatureCtrlFlagsChange == false) && (didXamlOptionalChangesChange == false))
+            if (!IsServiceCompile && (xamlTypeInfoNeeded == false) && (didAssembliesChange == false) && (didFeatureCtrlFlagsChange == false) && (didXamlOptionalChangesChange == false) && !didHotReloadCodegenChange)
             {
                 bool haveGeneratedPass2CodeFiles = ShortcutBackupRestoreGeneratedPass2Files_WhenNothingExternalHasChanged();
                 bool xamlFilesChanged = DidXAMLFilesChange();
@@ -963,7 +971,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     // the file itself is different. Some of the feature ctrl flags will cause different code to be generated
                     // on a per page basis (i.e. EnableXBindDiagnostics), while others will only affect app.xaml (i.e. EnableWin32CodeGen).
                     // But we'll be conservative and just assume that all files need to regenerate if the flags have changed
-                    bool forceRegenerate = didAssembliesChange || didFeatureCtrlFlagsChange;
+                    bool forceRegenerate = didAssembliesChange || didFeatureCtrlFlagsChange || didHotReloadCodegenChange;
                     if (IsPass1 && !tif.OutOfDate() && !forceRegenerate)
                     {
                         // If the file is up to date then report the existing "on disk" generated
@@ -1119,6 +1127,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         {
                             return false;
                         }
+                    }
+                    if (!IsPass1 && !IsServiceCompile && !IsDesignTimeBuild)
+                    {
+                        UpdateHotReloadState();
                     }
                 }
                 catch (TypeLoadException)
@@ -1703,6 +1715,30 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         }
         #endregion
 
+        // EnableXamlHotReloadCodegen: what a build records for the compiler service (see XamlHotReloadHistory). A build
+        // without it removes what an earlier build recorded.
+        private void UpdateHotReloadState()
+        {
+            string folder = XamlHotReloadHistory.FolderOf(OutputFolderFullpath);
+            if (!IsHotReloadCodegen)
+            {
+                if (Directory.Exists(folder))
+                {
+                    Directory.Delete(folder, recursive: true);
+                }
+                return;
+            }
+            Directory.CreateDirectory(folder);
+            foreach (XamlClassCodeInfo classCodeInfo in _classCodeInfos.Values.Where(c => c.ConnectionIdKeys != null))
+            {
+                XamlHotReloadHistory.WriteConnectionIds(folder, classCodeInfo.ClassName.FullName, classCodeInfo.ConnectionIdKeys.Ids);
+            }
+            if (!ShouldSuppressTypeInfoCodeGen())
+            {
+                XamlHotReloadHistory.WriteTypeOrder(folder, TypeOrder());
+            }
+        }
+
         private List<string> TypeOrder()
         {
             return _typeInfoCollector.SchemaInfo.TypeTableFromAllAssemblies.Select(t => t.StandardName).ToList();
@@ -1742,7 +1778,16 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             else
             {
+                bool keepsTypeOrder = IsHotReloadCodegen && IsServiceCompile && !IsPass1;
+                if (keepsTypeOrder)
+                {
+                    _typeInfoCollector.SchemaInfo.KeepTypeOrder(ServiceHistory.TypeOrder);
+                }
                 codeFiles = _codeGenerator.GenerateTypeInfo(_typeInfoCollector.AppXamlInfo);
+                if (keepsTypeOrder)
+                {
+                    ServiceHistory.TypeOrder = TypeOrder();
+                }
             }
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_GenerateTypeInfoEnd);
 
@@ -2226,6 +2271,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         !String.IsNullOrWhiteSpace(tif.XamlComponentResourceLocation))
                     {
                         classCodeInfo.XamlComponentResourceLocation = GetComponentResourceLocation(tif.XamlComponentResourceLocation);
+                    }
+                    if (IsHotReloadCodegen && !IsPass1)
+                    {
+                        classCodeInfo.ConnectionIdKeys = IsServiceCompile
+                            ? new ConnectionIdKeys(ServiceHistory.ConnectionIds(classFullName), keepRecordedIds: true)
+                            : new ConnectionIdKeys(new Dictionary<string, int>(StringComparer.Ordinal), keepRecordedIds: false);
                     }
                     _classCodeInfos.Add(classFullName, classCodeInfo);
                 }

@@ -310,5 +310,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         {
             get { return ++lastConnectionId; }
         }
+
+        // EnableXamlHotReloadCodegen, pass 2: records (build) or reuses (compiler service) each element's ID.
+        internal ConnectionIdKeys ConnectionIdKeys { get; set; }
+
+        internal int GetConnectionId(XamlDomObject domObject)
+        {
+            int next = NextConnectionId;
+            return ConnectionIdKeys == null ? next : ConnectionIdKeys.GetConnectionId(domObject, next);
+        }
     }
 }

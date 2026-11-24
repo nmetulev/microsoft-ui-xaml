@@ -21,7 +21,9 @@
     <Compile Include="$(MSBuildThisFileDirectory)Utilities\ILog.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ClassCodeGenFile.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)CompileXamlInternal.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)KeptMembers.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)XamlCompilerService.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)XamlHotReloadHistory.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ExperimentalFeatures.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)GlobalSuppressions.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\BindingInfoDefinition.cs" />
@@ -172,6 +174,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\XamlCodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CompileError.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\ConnectionIdElement.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\ConnectionIdKeys.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\EventAssignment.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\FieldDefinition.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\LineNumberInfo.cs" />

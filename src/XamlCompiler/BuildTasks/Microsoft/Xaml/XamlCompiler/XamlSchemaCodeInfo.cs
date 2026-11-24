@@ -133,6 +133,28 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             get { return _userMemberInfo; }
         }
 
+        // EnableXamlHotReloadCodegen, compiler service: the types in previousOrder keep that order, and new types follow in
+        // the order they were found, so adding a type while the app runs doesn't renumber the others in XamlTypeInfo.
+        internal void KeepTypeOrder(IList<string> previousOrder)
+        {
+            var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = previousOrder.Count - 1; i >= 0; i--)
+            {
+                rank[previousOrder[i]] = i;
+            }
+            List<InternalTypeEntry> ordered = _typeTable
+                .Select((type, found) => (type, found))
+                .OrderBy(t => rank.TryGetValue(t.type.StandardName, out int r) ? r : previousOrder.Count + t.found)
+                .Select(t => t.type)
+                .ToList();
+            _typeTable.Clear();
+            _typeTable.AddRange(ordered);
+            for (int i = 0; i < _typeTable.Count; i++)
+            {
+                _typeTable[i].MoveTo(i);
+            }
+        }
+
         public bool TryFindType(string systemName, out InternalTypeEntry type)
         {
             foreach (InternalTypeEntry ixType in _typeTable)

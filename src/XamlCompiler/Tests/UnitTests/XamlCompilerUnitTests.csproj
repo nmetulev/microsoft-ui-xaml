@@ -30,6 +30,7 @@
     <Reference Include="System" />
     <Reference Include="System.Windows" />
     <Reference Include="System.Xml" />
+    <Reference Include="System.Xml.Linq" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.11.0">
@@ -63,6 +64,7 @@
       <Link>FixMasters.cs</Link>
     </Compile>
     <Compile Include="HarvesterTests.cs" />
+    <Compile Include="HotReloadCodegenTests.cs" />
     <Compile Include="KnownBugs.cs" />
     <Compile Include="MetadataCacheTests.cs" />
     <Compile Include="MemberCacheTests.cs" />

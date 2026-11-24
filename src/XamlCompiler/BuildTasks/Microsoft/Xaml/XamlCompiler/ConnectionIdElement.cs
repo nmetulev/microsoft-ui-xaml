@@ -51,7 +51,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             this.Type = domObject.Type;
             this.ApiInformation = domObject.ApiInformation;
 
-            this.ConnectionId = classCodeInfo.NextConnectionId;
+            this.ConnectionId = classCodeInfo.GetConnectionId(domObject);
             this.LineNumberInfo = new LineNumberInfo(domObject);
             this.ParentFileCodeInfo = fileCodeInfo;
             this.Children = new List<ConnectionIdElement>();
