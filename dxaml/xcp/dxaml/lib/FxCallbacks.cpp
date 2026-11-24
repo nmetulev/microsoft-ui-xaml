@@ -714,6 +714,9 @@ namespace FxCallbacks
     _Check_return_ HRESULT DependencyObject_RefreshExpressionsOnThemeChange(_In_ CDependencyObject* nativeDO, _In_ Theming::Theme theme, _In_ bool forceRefresh)
         { return DirectUI::DependencyObject::RefreshExpressionsOnThemeChange(nativeDO, theme, forceRefresh); }
 
+    _Check_return_ HRESULT DependencyObject_ClearExpressionsHoldingSingleParentObjects(_In_ CDependencyObject* nativeDO)
+        { return DirectUI::DependencyObject::ClearExpressionsHoldingSingleParentObjects(nativeDO); }
+
     _Check_return_ HRESULT FlyoutPresenter_GetParentMenuFlyoutSubItem(_In_ CDependencyObject* nativeDO, _Outptr_ CDependencyObject** ppMenuFlyoutSubItem)
         { return DirectUI::MenuFlyoutPresenter::GetParentMenuFlyoutSubItem(nativeDO, ppMenuFlyoutSubItem); }
 

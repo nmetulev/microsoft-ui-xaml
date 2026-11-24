@@ -17,6 +17,26 @@
 #include "XamlTelemetry.h"
 #include "MetadataAPI.h"
 #include <OptionalChangeState.h>
+#include <XamlHotReload.h>
+
+// The old template's parts can still be alive (an app may hold one, e.g. for its composition
+// visual), so their bindings would keep objects that came from this control, such as a UIElement
+// template-bound into Border.Child. Release those so the new template's parts can take them.
+static _Check_return_ HRESULT ReleaseObjectsBoundIntoOldTemplate(_In_ CControl* control, _In_ CUIElement* element)
+{
+    if (element->GetTemplatedParent() == control)
+    {
+        IFC_RETURN(FxCallbacks::DependencyObject_ClearExpressionsHoldingSingleParentObjects(element));
+    }
+
+    auto children = element->GetUnsortedChildren();
+    for (UINT32 i = 0; i < children.GetCount(); i++)
+    {
+        IFC_RETURN(ReleaseObjectsBoundIntoOldTemplate(control, children[i]));
+    }
+
+    return S_OK;
+}
 
 //  Class:  CControl
 //
@@ -70,6 +90,13 @@ CControl::SetValue(_In_ const SetValueParams& args)
                         {
                             IFC_RETURN(E_INVALIDARG);
                         }
+
+                        // Hot reload re-templates live controls when it replaces their styles.
+                        if (XamlHotReload::IsActive())
+                        {
+                            IFC_RETURN(ReleaseObjectsBoundIntoOldTemplate(this, pUIElement));
+                        }
+
                         IFC_RETURN(this->RemoveChild(pUIElement));
                         IFC_RETURN(GetContext()->RemoveNameScope(this, Jupiter::NameScoping::NameScopeType::TemplateNameScope));
                     }

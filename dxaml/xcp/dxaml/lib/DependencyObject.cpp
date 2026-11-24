@@ -2025,6 +2025,46 @@ DependencyObject::RefreshExpressionsOnThemeChange(_In_ CDependencyObject* pCoreD
     return S_OK;
 }
 
+// Clears bound properties (e.g. Border.Child="{TemplateBinding X}") whose value is an object that
+// can only have one parent, so another element can take that object.
+/*static */ _Check_return_ HRESULT
+DependencyObject::ClearExpressionsHoldingSingleParentObjects(_In_ CDependencyObject* pCoreDO)
+{
+    auto peer = pCoreDO->GetDXamlPeer();
+    if (!peer || !peer->m_pMapValueTable)
+    {
+        return S_OK;
+    }
+
+    Jupiter::stack_vector<const CDependencyProperty*, 4> toClear;
+    for (const auto& tableEntry : *(peer->m_pMapValueTable))
+    {
+        if (!tableEntry.second->IsExpression())
+        {
+            continue;
+        }
+
+        auto property = DirectUI::MetadataAPI::GetDependencyPropertyByIndex(tableEntry.first);
+        if (!property->RequiresMultipleAssociationCheck())
+        {
+            continue;
+        }
+
+        auto valueDO = ctl::query_interface_cast<DependencyObject>(tableEntry.second->GetEffectiveValue().Get());
+        if (valueDO && !valueDO->GetHandle()->DoesAllowMultipleAssociation())
+        {
+            toClear.m_vector.push_back(property);
+        }
+    }
+
+    for (auto property : toClear.m_vector)
+    {
+        IFC_RETURN(peer->ClearValue(property));
+    }
+
+    return S_OK;
+}
+
 _Check_return_ HRESULT
 DependencyObject::RegisterPropertyChangedCallback(_In_ const CDependencyProperty* pDP, _In_ xaml::IDependencyPropertyChangedCallback *handler, _Out_ INT64 *token)
 {

@@ -85,6 +85,8 @@ namespace FxCallbacks
 
     _Check_return_ HRESULT DependencyObject_RefreshExpressionsOnThemeChange(_In_ CDependencyObject* nativeDO, _In_ Theming::Theme theme, _In_ bool forceRefresh);
 
+    _Check_return_ HRESULT DependencyObject_ClearExpressionsHoldingSingleParentObjects(_In_ CDependencyObject* nativeDO);
+
     _Check_return_ HRESULT FlyoutPresenter_GetParentMenuFlyoutSubItem(_In_ CDependencyObject* nativeDO, _Outptr_ CDependencyObject** ppMenuFlyoutSubItem);
 
     _Check_return_ HRESULT UIElement_OnCreateAutomationPeer(_In_ CDependencyObject* nativeTarget, _Out_ CAutomationPeer** returnAP);

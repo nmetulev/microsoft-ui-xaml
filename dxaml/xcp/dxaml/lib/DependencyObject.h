@@ -624,6 +624,8 @@ namespace DirectUI
 
         static _Check_return_ HRESULT RefreshExpressionsOnThemeChange(_In_ CDependencyObject* pCoreDO, _In_ Theming::Theme theme, _In_ bool forceRefresh);
 
+        static _Check_return_ HRESULT ClearExpressionsHoldingSingleParentObjects(_In_ CDependencyObject* pCoreDO);
+
     protected:
         bool ShouldRaiseEvent(KnownEventIndex eventID);
         _Check_return_ HRESULT EventAddPreValidation(_In_ void* const pValue, EventRegistrationToken* const ptToken) const;
