@@ -100,10 +100,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             {
                 _loadedFiles.Remove(file);
             }
-            // The factory caches types by module path: a newer build at the same path must get new types.
-            foreach (Module module in asm.GetModules())
+            foreach (MetadataOnlyModule module in asm.GetModules().OfType<MetadataOnlyModule>())
             {
-                ((XamlReflectionFactory)_loader.Factory).RemoveScope(module.FullyQualifiedName);
+                ((XamlReflectionFactory)_loader.Factory).RemoveScope(module);
             }
         }
 

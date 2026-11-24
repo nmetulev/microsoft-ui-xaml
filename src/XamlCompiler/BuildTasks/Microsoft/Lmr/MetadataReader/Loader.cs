@@ -99,8 +99,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         {
             var peReader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(image));
             var reader = peReader.GetMetadataReader(ReaderOptions);
-            return AssemblyFactory.CreateAssembly(m_universe, peReader, reader, this.Factory, location);
+            var module = new MetadataOnlyModule(m_universe, peReader, reader, this.Factory, location) { ImageGeneration = ++m_imageCount };
+            return new MetadataOnlyAssembly(module, location);
         }
+
+        private int m_imageCount;
                 
         /// <summary>
         /// Load a multi-module assembly, explicitly specifying all modules.

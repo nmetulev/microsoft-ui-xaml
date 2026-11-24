@@ -18,10 +18,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             MetadataOnlyCommonType type;
             Dictionary<int, MetadataOnlyCommonType> typeCache;
 
-            if (!_scopeCache.TryGetValue(scope.FullyQualifiedName, out typeCache))
+            if (!_scopeCache.TryGetValue(ScopeKey(scope), out typeCache))
             {
                 typeCache = new Dictionary<int, MetadataOnlyCommonType>();
-                _scopeCache.Add(scope.FullyQualifiedName, typeCache);
+                _scopeCache.Add(ScopeKey(scope), typeCache);
             }
 
             int tokenValue = MetadataTokens.GetToken(typeDefHandle);
@@ -33,9 +33,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             return type;
         }
 
-        public void RemoveScope(string fullyQualifiedName)
+        public void RemoveScope(MetadataOnlyModule scope)
         {
-            _scopeCache.Remove(fullyQualifiedName);
+            _scopeCache.Remove(ScopeKey(scope));
+        }
+
+        // Images loaded in memory can share a location (see MetadataOnlyModule.ImageGeneration).
+        private static string ScopeKey(MetadataOnlyModule scope)
+        {
+            return scope.ImageGeneration == 0 ? scope.FullyQualifiedName : scope.FullyQualifiedName + "|" + scope.ImageGeneration;
         }
     }
 }

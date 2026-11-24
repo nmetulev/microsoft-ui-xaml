@@ -1,8 +1,11 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -111,6 +114,43 @@ namespace UnitTests
             StringAssert.Contains(next, "private void Update_obj5(int value)");
             StringAssert.Contains(next, "private long obj5;");
             Assert.IsFalse(next.Contains("private int obj5;"), next);
+        }
+
+        [TestMethod]
+        public void HotReloadService_ImagesWithReorderedTypesResolveTypesByName()
+        {
+            // The compiler service replaces the project's assembly with each newer build, at the same location; a newer
+            // build can give the same types other metadata tokens.
+            byte[] first = CompileImage("namespace App { public class Contact { } public class Message { } }");
+            byte[] second = CompileImage("namespace App { public class Message { } public class Contact { } }");
+            object universe = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.Lmr.XamlTypeUniverse").CreateInstance(new object[] { true });
+            MethodInfo load = universe.GetType().GetMethod("LoadAssemblyFromImage");
+            MethodInfo unload = universe.GetType().GetMethod("UnloadAssembly");
+            string location = Path.Combine(Path.GetTempPath(), "App.dll");
+
+            var firstBuild = (Assembly)load.Invoke(universe, new object[] { first, location });
+            var cache = new Dictionary<Type, string> { { firstBuild.GetType("App.Contact"), "Contact" } };
+            unload.Invoke(universe, new object[] { firstBuild });
+            var secondBuild = (Assembly)load.Invoke(universe, new object[] { second, location });
+
+            // Types of the first build that something still holds can create more of them; they don't stand in for the
+            // second build's types, by token or by equality.
+            firstBuild.GetTypes();
+            Assert.AreEqual("App.Contact", secondBuild.GetType("App.Contact").FullName);
+            Assert.AreEqual("App.Message", secondBuild.GetType("App.Message").FullName);
+            Assert.IsFalse(cache.ContainsKey(secondBuild.GetType("App.Message")));
+        }
+
+        private static byte[] CompileImage(string code)
+        {
+            CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },
+                new[] { MetadataReference.CreateFromFile(typeof(object).Assembly.Location) },
+                new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            using (var stream = new MemoryStream())
+            {
+                Assert.IsTrue(compilation.Emit(stream).Success);
+                return stream.ToArray();
+            }
         }
 
         private string Generate(string xaml, DirectUISchemaContext schema, bool isPass1, bool hotReload)

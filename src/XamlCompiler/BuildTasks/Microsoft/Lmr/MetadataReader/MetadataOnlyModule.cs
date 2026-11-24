@@ -129,7 +129,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
                     return false;
                 }
 
-                return ScopeName == resolver.ScopeName;
+                return ScopeName == resolver.ScopeName && ImageGeneration == resolver.ImageGeneration;
             }
             else
             {
@@ -141,6 +141,14 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         {
             return m_assemblyResolver.GetHashCode() ^ (ScopeName?.GetHashCode() ?? 0);
         }
+
+        /// <summary>
+        /// Nonzero for a module read from an image in memory (Loader.ReadAssemblyFromImage): each image is a module of its
+        /// own, even when an earlier one had the same name and location, so their types (equal by module and token) and
+        /// the factory's type cache never mix. The XAML compiler service gets a new build of the project's assembly on
+        /// every compile, with different tokens. Zero for modules read from files, as before.
+        /// </summary>
+        internal int ImageGeneration { get; set; }
 
         readonly private ITypeUniverse m_assemblyResolver;
 
