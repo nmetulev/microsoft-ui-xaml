@@ -117,6 +117,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.IO
 
         public string EnabledXamlOptionalChanges { get; set; }
         public string DisabledXamlOptionalChanges { get; set; }
+        public bool EnableXamlHotReloadCodegen { get; set; }
         #endregion
 
         #region Task Input Properties

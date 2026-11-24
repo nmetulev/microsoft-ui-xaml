@@ -34,7 +34,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public bool IsManaged { get; }
         public bool IsNative { get; }
         public bool IsStringNullable { get; }
-        public string Pass1Extension { get; }
+        public string Pass1Extension { get; private set; }
         public string Pass2Extension { get; }
 
         // Codegen Delegates
@@ -59,6 +59,15 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                     XamlCompilerResources.XamlCompiler_LanguageUnsupported, name));
             }
             return language;
+        }
+
+        // EnableXamlHotReloadCodegen names the C# pass 1 file <Page>.i.g.cs: .NET hot reload ignores files named
+        // *.g.i.cs (it treats them as WPF design-time files), and WinUI declares x:Name fields there.
+        public Language WithPass1Extension(string pass1Extension)
+        {
+            Language copy = (Language)MemberwiseClone();
+            copy.Pass1Extension = pass1Extension;
+            return copy;
         }
 
         private Language(

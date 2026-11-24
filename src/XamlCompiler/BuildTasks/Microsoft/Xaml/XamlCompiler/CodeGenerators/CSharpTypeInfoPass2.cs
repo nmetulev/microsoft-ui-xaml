@@ -34,6 +34,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
 using System.Diagnostics.CodeAnalysis;
 
 ");
+            this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadMetadataUpdateHandler));
   if(Model.IsPass1)
     {
         WriteLine(TypeInfoDefinition.CSharpPass1StubMarker);
@@ -174,7 +175,9 @@ using System.Diagnostics.CodeAnalysis;
             this.Write(this.ToStringHelper.ToStringWithCulture(DebuggerNonUserCodeAttribute));
             this.Write("\r\n    internal partial class XamlTypeInfoProvider\r\n    {\r\n        public ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlType)));
-            this.Write(" GetXamlTypeByType(global::System.Type type)\r\n        {\r\n            ");
+            this.Write(" GetXamlTypeByType(global::System.Type type)\r\n        {\r\n");
+            this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadResetCall));
+            this.Write("            ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlType)));
             this.Write(@" xamlType;
             lock (_xamlTypeCacheByType) 
@@ -215,7 +218,9 @@ using System.Diagnostics.CodeAnalysis;
                     "             }\r\n            }\r\n            return xamlType;\r\n        }\r\n\r\n      " +
                     "  public ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlType)));
-            this.Write(" GetXamlTypeByName(string typeName)\r\n        {\r\n            if (string.IsNullOrEm" +
+            this.Write(" GetXamlTypeByName(string typeName)\r\n        {\r\n");
+            this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadResetCall));
+            this.Write("            if (string.IsNullOrEm" +
                     "pty(typeName))\r\n            {\r\n                return null;\r\n            }\r\n    " +
                     "        ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlType)));
@@ -258,7 +263,9 @@ using System.Diagnostics.CodeAnalysis;
                     "             }\r\n            }\r\n            return xamlType;\r\n        }\r\n\r\n      " +
                     "  public ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlMember)));
-            this.Write(" GetMemberByLongName(string longMemberName)\r\n        {\r\n            if (string.Is" +
+            this.Write(" GetMemberByLongName(string longMemberName)\r\n        {\r\n");
+            this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadResetCall));
+            this.Write("            if (string.Is" +
                     "NullOrEmpty(longMemberName))\r\n            {\r\n                return null;\r\n     " +
                     "       }\r\n            ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlMember)));
@@ -295,6 +302,7 @@ using System.Diagnostics.CodeAnalysis;
                     "ry<string, ");
             this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.IXamlMember)));
             this.Write(">();\r\n\r\n");
+            this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadProviderMembers));
       Output_TypeTables();            
             this.Write("\r\n");
       Output_Activators();            

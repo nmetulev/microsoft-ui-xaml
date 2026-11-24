@@ -183,6 +183,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
 
+        // Generate C# that .NET hot reload can update after a page is compiled again. Off unless a tool asks for it.
+        public bool EnableXamlHotReloadCodegen { get; set; }
+        internal bool IsHotReloadCodegen => EnableXamlHotReloadCodegen && Language?.Name == ProgrammingLanguage.CSharp;
+
         // Set by the compiler service (XamlCompilerService): the XAML files to compile, as full paths. The other pages
         // count as up to date, whatever their timestamps.
         internal ISet<string> ServiceFiles { get; set; }
@@ -352,6 +356,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             SdkXamlPages = GetFileItems(i.SdkXamlPages);
             EnabledXamlOptionalChanges = i.EnabledXamlOptionalChanges;
             DisabledXamlOptionalChanges = i.DisabledXamlOptionalChanges;
+            EnableXamlHotReloadCodegen = i.EnableXamlHotReloadCodegen;
+            if (IsHotReloadCodegen)
+            {
+                Language = Language.WithPass1Extension(".i.g.cs");
+            }
         }
 
         private IList<IFileItem> GetFileItems(List<MSBuildItem> list)
@@ -2080,6 +2089,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             projectInfo.RootNamespace = RootNamespace;
             projectInfo.IsLibrary = IsOutputTypeLibrary || IsOutputTypeWinMd;
             projectInfo.ShouldGenerateDisableXBind = this.EnableXBindDiagnostics;
+            projectInfo.IsHotReloadCodegen = this.IsHotReloadCodegen;
             projectInfo.EnableTypeInfoReflection = EnableTypeInfoReflection;
             projectInfo.EnableDefaultValidationContextGeneration = EnableDefaultValidationContextGeneration;
 

@@ -87,6 +87,12 @@ Licensed under the MIT License. See LICENSE in the project root for license info
         <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == '' AND ('$(Configuration)' == 'Debug' OR ('$(IsNativeLanguage)' != 'true' AND '$(Optimize)' != 'true') OR ('$(IsNativeLanguage)' == 'true' AND '$(UseDebugLibraries)' == 'true'))">true</EnableXamlHotReload>
         <EnableXamlHotReload Condition="'$(EnableXamlHotReload)' == ''">false</EnableXamlHotReload>
 
+        <!-- C# only, opt-in: generate code that .NET hot reload can update after a page is compiled again, for a hot
+             reload tool that runs the XAML compiler on every save (XamlCompiler.exe in serve mode). Off by default and not tied
+             to the configuration; the tool sets it on its own builds. Without it the generated code is unchanged. See
+             docs\design-notes\xamlcompiler-hot-reload.md. -->
+        <EnableXamlHotReloadCodegen Condition="'$(EnableXamlHotReloadCodegen)' == ''">false</EnableXamlHotReloadCodegen>
+
         <!-- Determine whether we are building for Win32 or UWP, while respecting any overrides..-->
 
         <!-- For native apps, AppContainerApplication is set to false for Win32 -->
@@ -426,7 +432,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
+                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+                EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" >
 
                 <Output Condition="'$(ManagedAssembly)'!='false' " ItemName="Compile"   TaskParameter="GeneratedCodeFiles" />
 
@@ -479,7 +486,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-            DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
+            DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+            EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" />
 
         <Exec Condition="'$(UseXamlCompilerExecutable)' == 'true'" IgnoreExitCode="true" Command='"$(XamlCompilerExePath)" "$(XamlCompilerExeInputJson)" "$(XamlCompilerExeOutputJson)"' />
 
@@ -556,7 +564,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
+                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+                EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" >
 
                 <Output Condition=" '$(ManagedAssembly)'!='false' " ItemName="Compile"   TaskParameter="GeneratedCodeFiles" />
 
@@ -609,7 +618,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
+                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+                EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" />
 
         <Exec Condition="'$(UseXamlCompilerExecutable)' == 'true'" IgnoreExitCode="true" Command='"$(XamlCompilerExePath)" "$(XamlCompilerExeInputJson)" "$(XamlCompilerExeOutputJson)"' />
 
@@ -734,7 +744,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
                 GenXbfPath="$(GenXbfPath)"
                 PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
                 EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" >
+                DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+                EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" >
 
                 <Output Condition=" '$(ManagedAssembly)'!='false' " ItemName="Compile"   TaskParameter="GeneratedCodeFiles" />
                 <Output Condition=" '$(ManagedAssembly)'=='false' " ItemName="XamlGFiles" TaskParameter="GeneratedCodeFiles" />
@@ -796,7 +807,8 @@ Licensed under the MIT License. See LICENSE in the project root for license info
             GenXbfPath="$(GenXbfPath)"
             PrecompiledHeaderFile="$(PrecompiledHeaderFile)"
             EnabledXamlOptionalChanges="$(EnabledXamlOptionalChanges)"
-            DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)" />
+            DisabledXamlOptionalChanges="$(DisabledXamlOptionalChanges)"
+            EnableXamlHotReloadCodegen="$(EnableXamlHotReloadCodegen)" />
 
         <Exec Condition="'$(UseXamlCompilerExecutable)' == 'true'" IgnoreExitCode="true" Command='"$(XamlCompilerExePath)" "$(XamlCompilerExeInputJson)" "$(XamlCompilerExeOutputJson)"' />
 

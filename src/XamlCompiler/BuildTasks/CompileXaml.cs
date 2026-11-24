@@ -120,6 +120,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Tasks
 
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
+        public bool EnableXamlHotReloadCodegen { get; set; }
         #endregion
 
         #region ICompileXamlOutputs backing fields

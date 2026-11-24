@@ -30,6 +30,7 @@
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\CppCX_CodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\NativeCodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharp_CodeGenerator.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\CSharpHotReload.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\VB_CodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CodeGenerators\CppWinRT_CodeGenerator.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)Microsoft\Xaml\XamlCompiler\CreateFromStringMethod.cs" />

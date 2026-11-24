@@ -111,6 +111,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
 
         public string EnabledXamlOptionalChanges { get; set; }
         public string DisabledXamlOptionalChanges { get; set; }
+        public bool EnableXamlHotReloadCodegen { get; set; }
 
         public static CompilerInputs FromMSBuildTaskInputs(ICompileXamlInputs i)
         {
@@ -160,6 +161,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
             r.XamlResourceMapName = i.XamlResourceMapName;
             r.EnabledXamlOptionalChanges = i.EnabledXamlOptionalChanges;
             r.DisabledXamlOptionalChanges = i.DisabledXamlOptionalChanges;
+            r.EnableXamlHotReloadCodegen = i.EnableXamlHotReloadCodegen;
             return r;
         }
 

@@ -886,7 +886,9 @@ this.Write("            private static bool ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(ba.DisableFlagName));
 
-this.Write(" = false;\r\n");
+this.Write(this.ToStringHelper.ToStringWithCulture(StaticFalseInitializer));
+
+this.Write(";\r\n");
 
                      }
                  }
@@ -1652,8 +1654,11 @@ this.Write("                this.initialized = true;\r\n            }\r\n\r\n   
 
              if (bindUniverse.NeedsBindingsTracking)
              {
-this.Write("                this.bindingsTracking.ReleaseAllListeners();\r\n                thi" +
-        "s.initialized = false;\r\n");
+this.Write("                this.bindingsTracking");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadNullConditional));
+
+this.Write(".ReleaseAllListeners();\r\n                this.initialized = false;\r\n");
 
              }
 this.Write("            }\r\n\r\n            public void DisconnectUnloadedObject(int connectionI" +
@@ -1810,13 +1815,19 @@ this.Write("\r\n            public void Activated(object obj, ");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownNamespaces.Xaml)));
 
-this.Write(".WindowActivatedEventArgs data)\r\n            {\r\n                this.Initialize()" +
-        ";\r\n            }\r\n\r\n            public void Loading(");
+this.Write(".WindowActivatedEventArgs data)\r\n            {\r\n");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadReplacedBindingsGuard));
+
+this.Write("                this.Initialize();\r\n            }\r\n\r\n            public void Loading(");
 
 this.Write(this.ToStringHelper.ToStringWithCulture(Globalize(KnownTypes.FrameworkElement)));
 
-this.Write(" src, object data)\r\n            {\r\n                this.Initialize();\r\n          " +
-        "  }\r\n");
+this.Write(" src, object data)\r\n            {\r\n");
+
+this.Write(this.ToStringHelper.ToStringWithCulture(HotReloadReplacedBindingsGuard));
+
+this.Write("                this.Initialize();\r\n            }\r\n");
 
              }
              if (bindUniverse.DistinctConvertersUsed.Count() > 0) 

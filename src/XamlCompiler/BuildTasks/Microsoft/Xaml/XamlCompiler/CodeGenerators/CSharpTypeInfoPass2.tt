@@ -11,7 +11,7 @@
 
 using System.Diagnostics.CodeAnalysis;
 
-<#  if(Model.IsPass1)
+<#=HotReloadMetadataUpdateHandler#><#  if(Model.IsPass1)
     {
         WriteLine(TypeInfoDefinition.CSharpPass1StubMarker);
         WriteLine(TypeInfoDefinition.CSharpPass1WarningPragma);
@@ -158,7 +158,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
     {
         public <#=Globalize(KnownTypes.IXamlType)#> GetXamlTypeByType(global::System.Type type)
         {
-            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
+<#=HotReloadResetCall#>            <#=Globalize(KnownTypes.IXamlType)#> xamlType;
             lock (_xamlTypeCacheByType) 
             { 
                 if (_xamlTypeCacheByType.TryGetValue(type, out xamlType))
@@ -197,7 +197,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 
         public <#=Globalize(KnownTypes.IXamlType)#> GetXamlTypeByName(string typeName)
         {
-            if (string.IsNullOrEmpty(typeName))
+<#=HotReloadResetCall#>            if (string.IsNullOrEmpty(typeName))
             {
                 return null;
             }
@@ -240,7 +240,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
 
         public <#=Globalize(KnownTypes.IXamlMember)#> GetMemberByLongName(string longMemberName)
         {
-            if (string.IsNullOrEmpty(longMemberName))
+<#=HotReloadResetCall#>            if (string.IsNullOrEmpty(longMemberName))
             {
                 return null;
             }
@@ -269,7 +269,7 @@ namespace <#=ProjectInfo.XamlTypeInfoNamespace#>
         global::System.Collections.Generic.Dictionary<string, <#=Globalize(KnownTypes.IXamlMember)#>>
                 _xamlMembers = new global::System.Collections.Generic.Dictionary<string, <#=Globalize(KnownTypes.IXamlMember)#>>();
 
-<#      Output_TypeTables();            #>
+<#=HotReloadProviderMembers#><#      Output_TypeTables();            #>
 
 <#      Output_Activators();            #>
 <#      Output_StaticInitializers();    #>

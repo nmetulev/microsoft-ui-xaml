@@ -43,6 +43,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
         public bool ShouldGenerateDisableXBind { get; set; }
 
+        // EnableXamlHotReloadCodegen (C#): see CSharp_CodeGenerator.IsHotReloadCodegen.
+        public bool IsHotReloadCodegen { get; set; }
+
         // Properties only relevent for C++
         public Dictionary<String, String> ClassToHeaderFileMap { get; set; }
 

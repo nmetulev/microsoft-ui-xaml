@@ -479,7 +479,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 <#+                 {#>
 <#+                     foreach (BindAssignment ba in bindElement.BindAssignments)#>
 <#+                     {#>
-            private static bool <#=ba.DisableFlagName#> = false;
+            private static bool <#=ba.DisableFlagName#><#=StaticFalseInitializer#>;
 <#+                     }#>
 <#+                 }#>
 <#+             }#>
@@ -913,7 +913,7 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
             {
 <#+             if (bindUniverse.NeedsBindingsTracking)#>
 <#+             {#>
-                this.bindingsTracking.ReleaseAllListeners();
+                this.bindingsTracking<#=HotReloadNullConditional#>.ReleaseAllListeners();
                 this.initialized = false;
 <#+             }#>
             }
@@ -1025,12 +1025,12 @@ namespace <#=Model.CodeInfo.ClassName.Namespace#>
 
             public void Activated(object obj, <#=Globalize(KnownNamespaces.Xaml)#>.WindowActivatedEventArgs data)
             {
-                this.Initialize();
+<#=HotReloadReplacedBindingsGuard#>                this.Initialize();
             }
 
             public void Loading(<#=Globalize(KnownTypes.FrameworkElement)#> src, object data)
             {
-                this.Initialize();
+<#=HotReloadReplacedBindingsGuard#>                this.Initialize();
             }
 <#+             }#>
 <#+             if (bindUniverse.DistinctConvertersUsed.Count() > 0) #>

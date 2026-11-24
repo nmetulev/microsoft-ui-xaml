@@ -36,6 +36,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             get { return $"[global::System.CodeDom.Compiler.GeneratedCodeAttribute(\"{KnownStrings.XAMLBuildTaskAsmName}\",\" {XamlCompilerVersion}\")]"; }
         }
 
+        // EnableXamlHotReloadCodegen: generate code that .NET hot reload can update (see CSharpHotReload.cs).
+        public bool IsHotReloadCodegen => ProjectInfo != null && ProjectInfo.IsHotReloadCodegen;
+
         public string DebuggerNonUserCodeAttribute
         {
             get { return "[global::System.Diagnostics.DebuggerNonUserCodeAttribute()]"; }

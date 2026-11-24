@@ -112,5 +112,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.MSBuildInterop
 
         string EnabledXamlOptionalChanges { get; set; }
         string DisabledXamlOptionalChanges { get; set; }
+
+        // C# code generation that .NET hot reload can update (EnableXamlHotReloadCodegen).
+        bool EnableXamlHotReloadCodegen { get; set; }
     }
 }
