@@ -899,10 +899,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 SourceFileManager.MarkApplicationFilesDirty();
             }
-            // A build whose hot reload state doesn't match EnableXamlHotReloadCodegen (it was just turned on or off)
-            // regenerates every page.
-            bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild &&
-                IsHotReloadCodegen != Directory.Exists(XamlHotReloadHistory.FolderOf(OutputFolderFullpath));
+            // A build whose hot reload state doesn't match EnableXamlHotReloadCodegen (it was just turned on or off, or the
+            // state is from a compiler that didn't copy the generated code) regenerates every page.
+            bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild && (IsHotReloadCodegen
+                ? !Directory.Exists(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath))
+                : Directory.Exists(XamlHotReloadHistory.FolderOf(OutputFolderFullpath)));
 
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
@@ -1736,6 +1737,17 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             if (!ShouldSuppressTypeInfoCodeGen())
             {
                 XamlHotReloadHistory.WriteTypeOrder(folder, TypeOrder());
+            }
+
+            // The generated C# this build compiled into the app (pass 1's files are unchanged since pass 1 wrote them).
+            var codeFiles = SourceFileManager.CodeGenFiles
+                .SelectMany(cgf => new[] { Language.Pass1Extension, Language.Pass2Extension }.Select(ext => Path.Combine(cgf.TargetFolderFullPath, cgf.BaseFileName + ext)))
+                .Concat(new[] { Path.Combine(OutputFolderFullpath, KnownStrings.XamlTypeInfo + Language.Pass2Extension) });
+            var copies = new HashSet<string>(codeFiles.Where(File.Exists).Select(f => XamlHotReloadHistory.WriteGeneratedText(OutputFolderFullpath, f)), StringComparer.OrdinalIgnoreCase);
+            Directory.CreateDirectory(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath));
+            foreach (string stale in Directory.EnumerateFiles(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath)).Where(f => !copies.Contains(f)).ToList())
+            {
+                File.Delete(stale);
             }
         }
 

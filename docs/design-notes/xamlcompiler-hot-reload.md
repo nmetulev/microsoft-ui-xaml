@@ -62,9 +62,11 @@ C# projects. A hot reload tool sets it on its own builds; the service uses whate
 | The service keeps the `XamlTypeInfo` type order | New types go at the end, so adding a type doesn't renumber the others |
 | The service keeps members the new code no longer has | .NET hot reload can't remove a field or a type, and Roslyn fails to remove a method an earlier update added. Such members stay, with empty bodies, inside a `#pragma warning disable` block marked "Kept by XAML hot reload" |
 
-A build with the property also writes `obj\...\XamlHotReload\`: one `<hash>.ids` file per page (connection ID keys) and
-`typeinfo.txt` (the type order). A build only writes these files and never reads them, so its output doesn't depend on
-earlier builds. Turning the property on or off regenerates every page.
+A build with the property also writes `obj\...\XamlHotReload\`: one `<hash>.ids` file per page (connection ID keys),
+`typeinfo.txt` (the type order), and `code\<hash>.cs`, a copy of each generated C# file the build compiled into the app.
+The service takes the members the app has from those copies, never from `<Page>.g.cs`: the next build's pass 1 empties
+that file, and an editor's design-time builds into the same folder rewrite it. A build only writes these files and never
+reads them, so its output doesn't depend on earlier builds. Turning the property on or off regenerates every page.
 
 ### What a host does
 

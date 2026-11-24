@@ -141,6 +141,36 @@ namespace UnitTests
             Assert.IsFalse(cache.ContainsKey(secondBuild.GetType("App.Message")));
         }
 
+        [TestMethod]
+        public void HotReloadService_KeptMembersSurviveADesignTimeBuild()
+        {
+            string outputFolder = Path.Combine(Path.GetTempPath(), "HotReloadTests", Guid.NewGuid().ToString("N"));
+            string page = Path.Combine(outputFolder, "Views", "MainPage.g.cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(page));
+            const string built = "namespace App\r\n{\r\n    partial class MainPage\r\n    {\r\n        private int obj4;\r\n    }\r\n}\r\n";
+            const string recompiled = "namespace App\r\n{\r\n    partial class MainPage\r\n    {\r\n    }\r\n}\r\n";
+            try
+            {
+                // The property-on build copies what it compiled into the app.
+                File.WriteAllText(page, built);
+                var history = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.XamlHotReloadHistory");
+                history.GetStaticMethod("WriteGeneratedText").Invoke(null, new object[] { outputFolder, page });
+
+                // A design-time build (an editor's, into the same obj) empties the page's generated code.
+                File.Move(page, page + ".backup");
+                File.WriteAllText(page, string.Empty);
+
+                object serviceHistory = history.CreateInstance(new object[] { outputFolder });
+                string appHas = (string)serviceHistory.GetType().GetMethod("GeneratedText").Invoke(serviceHistory, new object[] { page });
+                MethodInfo addRemovedMembers = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.KeptMembers").GetStaticMethod("AddRemovedMembers");
+                StringAssert.Contains((string)addRemovedMembers.Invoke(null, new object[] { appHas, recompiled }), "private int obj4;");
+            }
+            finally
+            {
+                Directory.Delete(outputFolder, recursive: true);
+            }
+        }
+
         private static byte[] CompileImage(string code)
         {
             CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },
