@@ -55,6 +55,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
         public string HotReloadResetCall => !HasHotReloadProvider ? string.Empty :
             "            ResetIfUpdated();\r\n";
 
+        // Locks in GetMemberByLongName's order (members, then types). A lookup made while this thread holds the type lock (one
+        // type's creation looking up another) leaves the reset to the next call, which would otherwise take them the other way.
         public string HotReloadProviderMembers => !HasHotReloadProvider ? string.Empty :
             "        private static int s_updateCount;\r\n" +
             "        private int _updateCountSeen;\r\n" +
@@ -66,11 +68,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.CodeGen
             "\r\n" +
             "        private void ResetIfUpdated()\r\n" +
             "        {\r\n" +
-            "            if (_updateCountSeen != s_updateCount)\r\n" +
+            "            if (_updateCountSeen != s_updateCount && !global::System.Threading.Monitor.IsEntered(_xamlTypeCacheByType))\r\n" +
             "            {\r\n" +
-            "                lock (_xamlTypeCacheByType)\r\n" +
+            "                lock (_xamlMembers)\r\n" +
             "                {\r\n" +
-            "                    lock (_xamlMembers)\r\n" +
+            "                    lock (_xamlTypeCacheByType)\r\n" +
             "                    {\r\n" +
             "                        _updateCountSeen = s_updateCount;\r\n" +
             "                        _xamlTypeCacheByName.Clear();\r\n" +
