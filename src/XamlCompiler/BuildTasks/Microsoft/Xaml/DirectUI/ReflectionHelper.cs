@@ -17,6 +17,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
             ReflectionHelper._typeAttrs = new ConcurrentDictionary<String, IList<CustomAttributeData>>();
         }
 
+        // The compiler service, before it adds a newer build of the project's assembly. Keys hold assembly-qualified names.
+        internal static void ReleaseAssembly(Assembly assembly)
+        {
+            string assemblyName = ", " + assembly.FullName;
+            foreach (string key in _typeAttrs.Keys)
+            {
+                if (key.Contains(assemblyName))
+                {
+                    _typeAttrs.TryRemove(key, out _);
+                }
+            }
+        }
+
         internal static IEnumerable<CustomAttributeData> GetCustomAttributeData(Type type, bool inherit, string attributeTypeFullName)
         {
             var allAttributesOnTheType = GetCustomAttributeData(type, inherit);

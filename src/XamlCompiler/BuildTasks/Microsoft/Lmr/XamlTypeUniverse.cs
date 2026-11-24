@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Reflection.Adds;
 using Microsoft.UI.Xaml.Markup.Compiler.Lmr;
@@ -14,6 +15,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
     {
         Dictionary<String, Assembly> _asmNameCache = new Dictionary<string, Assembly>();
         Dictionary<String, Type> _resolvedTypes = new Dictionary<string, Type>();
+        Dictionary<String, Assembly> _loadedFiles = new Dictionary<string, Assembly>(StringComparer.OrdinalIgnoreCase);
 
         // The loader, which handles shared state (factory, dispenser), and provides convenience
         // operators for loading modules.
@@ -50,7 +52,63 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         public Assembly LoadAssemblyFromFile(string path)
         {
             string fullPath = Path.GetFullPath(path);
-            Assembly asm = Loader.ReadAssemblyFromFile(path);
+            // A long-lived host reads each file once: with PrefetchFiles a read is the whole file.
+            if (PrefetchFiles && _loadedFiles.TryGetValue(fullPath, out Assembly loaded))
+            {
+                return loaded;
+            }
+            Assembly asm = Register(Loader.ReadAssemblyFromFile(path));
+            if (PrefetchFiles)
+            {
+                _loadedFiles[fullPath] = asm;
+            }
+            return asm;
+        }
+
+        /// <summary>
+        /// Read assembly files completely when they are loaded, so none stays open (for a long-lived host).
+        /// </summary>
+        public bool PrefetchFiles
+        {
+            get { return _loader.PrefetchFiles; }
+            set { _loader.PrefetchFiles = value; }
+        }
+
+        /// <summary>
+        /// Load an assembly from its image in memory, as if it were the file at <paramref name="location"/>.
+        /// </summary>
+        public Assembly LoadAssemblyFromImage(byte[] image, string location)
+        {
+            return Register(Loader.ReadAssemblyFromImage(image, Path.GetFullPath(location)));
+        }
+
+        /// <summary>
+        /// Remove an assembly and every cached lookup that leads to it, so that a newer build of it can be loaded.
+        /// </summary>
+        public void UnloadAssembly(Assembly asm)
+        {
+            RemoveAssembly(asm);
+            foreach (string name in _asmNameCache.Where(p => ReferenceEquals(p.Value, asm)).Select(p => p.Key).ToList())
+            {
+                _asmNameCache.Remove(name);
+            }
+            foreach (string name in _resolvedTypes.Where(p => ReferenceEquals(p.Value.Assembly, asm)).Select(p => p.Key).ToList())
+            {
+                _resolvedTypes.Remove(name);
+            }
+            foreach (string file in _loadedFiles.Where(p => ReferenceEquals(p.Value, asm)).Select(p => p.Key).ToList())
+            {
+                _loadedFiles.Remove(file);
+            }
+            // The factory caches types by module path: a newer build at the same path must get new types.
+            foreach (Module module in asm.GetModules())
+            {
+                ((XamlReflectionFactory)_loader.Factory).RemoveScope(module.FullyQualifiedName);
+            }
+        }
+
+        private Assembly Register(Assembly asm)
+        {
             string asmName = asm.GetName().FullName;
 
             Assembly loadedAsm = null;

@@ -32,5 +32,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
             }
             return type;
         }
+
+        public void RemoveScope(string fullyQualifiedName)
+        {
+            _scopeCache.Remove(fullyQualifiedName);
+        }
     }
 }

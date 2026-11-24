@@ -6,6 +6,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Linq;
     using System.Reflection;
     using Lmr;
 
@@ -42,6 +43,20 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.DirectUI
         public void AddLocalAssemblyToTypeNameMap(Assembly localAssembly)
         {
             this.AddWinmdAssembly(localAssembly, true);
+        }
+
+        // The compiler service, before it adds a newer build of the project's assembly.
+        public void RemoveAssemblyFromTypeNameMap(Assembly assembly)
+        {
+            string assemblyName = assembly.ToString();
+            knownAssemblies.Remove(assemblyName);
+            foreach (var map in new[] { this.fullNameToAsmQName, this.directUiToAsmQName })
+            {
+                foreach (string key in map.Where(p => p.Value.EndsWith(", " + assemblyName, StringComparison.Ordinal)).Select(p => p.Key).ToList())
+                {
+                    map.Remove(key);
+                }
+            }
         }
 
         public Type GetTypeByFullName(string fullName)

@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection.Metadata;
 using Debug = System.Diagnostics.Debug;
 using System.Globalization;
@@ -56,6 +57,8 @@ namespace System.Reflection.Adds
             {
                 return (Runtime.CompilerServices.RuntimeHelpers.GetHashCode(m_module) * 397) ^ m_handle.GetHashCode();
             }
+
+            public Module Module => m_module;
         }
 
         // List of loaded assemblies. We need this so that we know what to unload.
@@ -105,6 +108,26 @@ namespace System.Reflection.Adds
             Debug.Assert(ia2.TypeUniverse == this);
 
             this.m_loadedAssemblies.Add(assembly);
+        }
+
+        /// <summary>
+        /// Remove an assembly and the cached lookups that lead into it or start from it, so that a newer build of the
+        /// same assembly can be added (the XAML compiler service replaces the project's own assembly on every compile).
+        /// </summary>
+        public void RemoveAssembly(Assembly assembly)
+        {
+            this.m_loadedAssemblies.RemoveAll(a => ReferenceEquals(a, assembly));
+
+            // Names can also be generic instantiations over its types; dropping a few too many only costs a lookup.
+            string name = assembly.GetName().Name;
+            foreach (string key in m_hash.Where(p => ReferenceEquals(p.Value?.Assembly, assembly) || p.Key.Contains(name)).Select(p => p.Key).ToList())
+            {
+                m_hash.Remove(key);
+            }
+            foreach (AssemblyReferenceKey key in m_assemblyReferences.Where(p => ReferenceEquals(p.Value, assembly) || ReferenceEquals(p.Key.Module.Assembly, assembly)).Select(p => p.Key).ToList())
+            {
+                m_assemblyReferences.Remove(key);
+            }
         }
 
         /// <summary>

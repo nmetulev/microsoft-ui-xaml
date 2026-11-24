@@ -77,11 +77,29 @@ namespace Microsoft.UI.Xaml.Markup.Compiler.Lmr
         public Assembly ReadAssemblyFromFile(string file)
         {
             string fullPath = Path.GetFullPath(file);
-            var peReader = new PEReader(File.OpenRead(fullPath));
+            // Read the whole file now when asked, so it isn't kept open (and a build can replace it).
+            var peReader = PrefetchFiles
+                ? new PEReader(File.OpenRead(fullPath), PEStreamOptions.PrefetchEntireImage)
+                : new PEReader(File.OpenRead(fullPath));
             var reader = peReader.GetMetadataReader(ReaderOptions);
 
             Assembly a = AssemblyFactory.CreateAssembly(m_universe, peReader, reader, this.Factory, fullPath);
             return a;
+        }
+
+        /// <summary>
+        /// Read files completely when they are loaded instead of keeping them open (for a long-lived host).
+        /// </summary>
+        public bool PrefetchFiles { get; set; }
+
+        /// <summary>
+        /// Read an assembly from its image in memory, reported as being at <paramref name="location"/>.
+        /// </summary>
+        public Assembly ReadAssemblyFromImage(byte[] image, string location)
+        {
+            var peReader = new PEReader(System.Collections.Immutable.ImmutableArray.Create(image));
+            var reader = peReader.GetMetadataReader(ReaderOptions);
+            return AssemblyFactory.CreateAssembly(m_universe, peReader, reader, this.Factory, location);
         }
                 
         /// <summary>
