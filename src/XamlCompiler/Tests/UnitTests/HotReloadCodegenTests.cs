@@ -171,6 +171,25 @@ namespace UnitTests
             }
         }
 
+        [TestMethod]
+        public void HotReloadService_DesignTimeInputsGetAnError()
+        {
+            // What a design-time build writes to input.json.
+            Type inputsType = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.XamlCompilerService").GetMethod("Compile").DeclaringType
+                .GetConstructors().Single().GetParameters()[0].ParameterType;
+            object inputs = Activator.CreateInstance(inputsType);
+            inputsType.GetProperty("IsPass1").SetValue(inputs, true);
+            inputsType.GetProperty("CompileMode").SetValue(inputs, "DesignTimeBuild");
+
+            object service = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.XamlCompilerService").CreateInstance(new object[] { inputs, Path.GetTempPath() });
+            object result = service.GetType().GetMethod("Compile").Invoke(service, new object[] { 2, new[] { "MainPage.xaml" }, null });
+
+            Assert.IsFalse((bool)result.GetType().GetProperty("Success").GetValue(result));
+            var diagnostics = (System.Collections.IList)result.GetType().GetProperty("Diagnostics").GetValue(result);
+            Assert.AreEqual(1, diagnostics.Count);
+            StringAssert.Contains((string)diagnostics[0].GetType().GetProperty("Message").GetValue(diagnostics[0]), "design-time build");
+        }
+
         private static byte[] CompileImage(string code)
         {
             CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },

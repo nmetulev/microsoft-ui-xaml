@@ -70,7 +70,9 @@ reads them, so its output doesn't depend on earlier builds. Turning the property
 
 ### What a host does
 
-- Start the service after a build of the project with the property, from that build's `input.json`.
+- Start the service after a build of the project with the property, from that build's `input.json`. An editor's
+  design-time build rewrites `input.json` with its own pass 1 inputs, so take a copy when the build finishes; the
+  service answers every request with an error if it was started from inputs that aren't a build's pass 2.
 - On a save: pass 1 for the changed pages, compile the C# (the tool's own Roslyn workspace), pass 2 with the new
   assembly image, then apply the C# update and hand the `.xbf` to WinUI.
 - After applying an update, call the app's `MetadataUpdateHandler`s (`ClearCache`), as `dotnet watch` does.

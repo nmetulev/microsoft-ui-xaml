@@ -28,10 +28,21 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         // The types and members in the app's XamlTypeInfo. Null until a pass 2 has read every page.
         private HashSet<string> _typeInfo;
 
+        // Why the inputs can't be compiled from, or null.
+        private readonly string _inputsError;
+
         // outputFolder: where compiles write; it is emptied before each compile.
         public XamlCompilerService(CompilerInputs buildInputs, string outputFolder)
         {
             _inputs = buildInputs;
+            // A design-time build (an editor's) writes its own pass 1 inputs to the same input.json.
+            if (buildInputs.IsPass1 || buildInputs.CompileMode != "RealBuildPass2" || !(buildInputs.LocalAssembly?.Count > 0))
+            {
+                _inputsError = $"The inputs aren't those of a build's pass 2 (CompileMode '{buildInputs.CompileMode}'" +
+                    (buildInputs.LocalAssembly?.Count > 0 ? "" : ", no LocalAssembly") + "): a design-time build may have " +
+                    "rewritten input.json. Start the service from the input.json a build wrote, for example a copy taken when it finished.";
+                return;
+            }
             // What pass 2 gets and pass 1 doesn't.
             _pass2 = new CompilerInputs
             {
@@ -62,8 +73,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public XamlCompileResult Compile(int pass, IEnumerable<string> xamlFiles, byte[] localAssemblyImage)
         {
             Stopwatch clock = Stopwatch.StartNew();
-            var files = new HashSet<string>(xamlFiles.Select(f => Path.GetFullPath(Path.Combine(_projectFolder, f))), StringComparer.OrdinalIgnoreCase);
             var result = new XamlCompileResult();
+            if (_inputsError != null)
+            {
+                result.Diagnostics.Add(new MSBuildLogEntry(MSBuildLogEntry.EntryType.Error, null, "WMC9999", null, null, 0, 0, 0, 0, _inputsError));
+                return result;
+            }
+            var files = new HashSet<string>(xamlFiles.Select(f => Path.GetFullPath(Path.Combine(_projectFolder, f))), StringComparer.OrdinalIgnoreCase);
             foreach (string file in files.Where(f => !File.Exists(f)))
             {
                 result.Diagnostics.Add(new MSBuildLogEntry(MSBuildLogEntry.EntryType.Error, null, "WMC9999", null, file, 0, 0, 0, 0, "The file doesn't exist."));
