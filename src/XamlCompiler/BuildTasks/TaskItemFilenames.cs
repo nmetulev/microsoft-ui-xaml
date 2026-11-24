@@ -114,7 +114,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             this.RelativePathFromGeneratedCodeToXamlFile = FileHelpers.GetRelativePath(Path.GetDirectoryName(TargetFolder), this.ApparentRelativePath);
 
-            Refresh(_srcMgr.SavedState);
+            // The compiler service doesn't decide by timestamps (see OutOfDate), so it skips reading them.
+            if (_srcMgr.ServiceFiles == null)
+            {
+                Refresh(_srcMgr.SavedState);
+            }
         }
 
         public void Refresh(SavedStateManager saveState)
@@ -161,6 +165,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // A rebuild triggered by the above will also regnerated the XBF (if not disabled),
             // so simple "later than" tests are approprate for XBF files.
             // Note #2) A missing file has a very old date (Jan 1 1601)
+
+            // The compiler service compiles the files it is asked for, whatever the timestamps say.
+            if (_srcMgr.ServiceFiles != null)
+            {
+                return _srcMgr.ServiceFiles.Contains(SourceXamlFullPath);
+            }
 
             ////
             // All the reasons a XAML file could be "out of date"

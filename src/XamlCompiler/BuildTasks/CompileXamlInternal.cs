@@ -183,6 +183,22 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public string EnabledXamlOptionalChanges { get; set; } = string.Empty;
         public string DisabledXamlOptionalChanges { get; set; } = string.Empty;
 
+        // Set by the compiler service (XamlCompilerService): the XAML files to compile, as full paths. The other pages
+        // count as up to date, whatever their timestamps.
+        internal ISet<string> ServiceFiles { get; set; }
+        internal bool IsServiceCompile => ServiceFiles != null;
+
+        // Compiler service, pass 2: read every page for type information and generate XamlTypeInfo, as a build does.
+        // Otherwise only the requested pages (and the application) are read and XamlTypeInfo is left alone.
+        internal bool ServiceCollectsAllTypeInfo { get; set; }
+
+        // Compiler service, pass 2: the project's assembly as an image (for example a hot reload tool's metadata-only
+        // emit); null reads LocalAssembly.
+        internal byte[] ServiceLocalAssemblyImage { get; set; }
+
+        // The project's assembly in the compiler service's type universe, replaced on every compile.
+        private static Assembly s_serviceLocalAssembly;
+
         #endregion
 
         #region Output Properties
@@ -854,16 +870,18 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
             CleanUpSavedState();
 
-            bool areGeneratedFilesListsUpdated = false;
+            // The compiler service reports no file lists to MSBuild.
+            bool areGeneratedFilesListsUpdated = IsServiceCompile;
 
+            // The compiler service compiles exactly what it is asked to, so it skips the up-to-date checks.
             // Checking this always keeps us up-to-date, e.g. the first build after a solution load
             // prepares us for the 2nd build.
-            bool didAssembliesChange = DidAssembliesChange();
-            bool xamlTypeInfoNeeded = IsXAMLTypeInfoNeeded();
+            bool didAssembliesChange = !IsServiceCompile && DidAssembliesChange();
+            bool xamlTypeInfoNeeded = !IsServiceCompile && IsXAMLTypeInfoNeeded();
             // If the feature ctrl flags change, then skip checking every xaml file - we'll assume that since the user
             // edited the project file that something needs to be done.
-            bool didFeatureCtrlFlagsChange = DidFeatureControlFlagsChange();
-            bool didXamlOptionalChangesChange = DidXamlOptionalChangesChange();
+            bool didFeatureCtrlFlagsChange = !IsServiceCompile && DidFeatureControlFlagsChange();
+            bool didXamlOptionalChangesChange = !IsServiceCompile && DidXamlOptionalChangesChange();
             if (didXamlOptionalChangesChange)
             {
                 SourceFileManager.MarkApplicationFilesDirty();
@@ -872,7 +890,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
 
-            if ((xamlTypeInfoNeeded == false) && (didAssembliesChange == false) && (didFeatureCtrlFlagsChange == false) && (didXamlOptionalChangesChange == false))
+            if (!IsServiceCompile && (xamlTypeInfoNeeded == false) && (didAssembliesChange == false) && (didFeatureCtrlFlagsChange == false) && (didXamlOptionalChangesChange == false))
             {
                 bool haveGeneratedPass2CodeFiles = ShortcutBackupRestoreGeneratedPass2Files_WhenNothingExternalHasChanged();
                 bool xamlFilesChanged = DidXAMLFilesChange();
@@ -899,6 +917,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 s_typeUniverse = new XamlTypeUniverse(Language.IsManaged);
                 s_typeUniverse.ProjectPath = this.ProjectPath;
                 s_typeUniverse.ReferenceAssemblyPaths = this.ReferenceAssemblyPaths;
+                // The compiler service stays loaded across builds: it must not keep the references open.
+                s_typeUniverse.PrefetchFiles = IsServiceCompile;
 
                 PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_CreatedTypeUniverse);
             }
@@ -956,7 +976,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                             // Even if we want to skip type info collecting in pass 2, we always need to collect
                             // the App's type info to figure out the application name.
                             // When we aren't skipping type info, we want to collect everything.
-                            if (!skipPass2TypeInfo || tif.IsApplication)
+                            // The compiler service reads only the requested pages unless asked for all of them.
+                            bool collectTypeInfo = !skipPass2TypeInfo || tif.IsApplication;
+                            if (IsServiceCompile && !ServiceCollectsAllTypeInfo)
+                            {
+                                collectTypeInfo &= tif.IsApplication || tif.OutOfDate();
+                            }
+                            if (collectTypeInfo)
                             {
                                 failed |= !ProcessXamlFile_XamlTypeInfo(tif, ref xamlDomRoot);
                             }
@@ -990,7 +1016,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 // Only search for Metadata providers and Bindable types in Pass2.
-                if (!IsPass1 && !ShouldSuppressTypeInfoCodeGen())
+                bool serviceSkipsTypeInfo = IsServiceCompile && !IsPass1 && !ServiceCollectsAllTypeInfo;
+                if (!IsPass1 && !ShouldSuppressTypeInfoCodeGen() && !serviceSkipsTypeInfo)
                 {
                     _typeInfoCollector.AddMetadataAndBindableTypes(_loadedNonSystemAssemblies, _localAssembly);
                     if (!ReportSchemaErrors(String.Empty))
@@ -1022,6 +1049,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 // XBF generation is later (from the edited XAML).
                 foreach (TaskItemFilename tif in SourceFileManager.ClasslessXamlFiles)
                 {
+                    // The compiler service generates only the files it was asked for.
+                    if (IsServiceCompile && !tif.OutOfDate())
+                    {
+                        continue;
+                    }
                     if (!GenerateClasslessXamlOutputFile(tif.SourceXamlFullPath, tif.XamlGivenPath, tif.TargetFolder, tif.FileNameNoExtension, tif.XamlOutputFilename))
                         return false;
                 }
@@ -1059,7 +1091,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
 
                 // Native languages generate their pass-1 type info, and C# generates the
                 // XamlMetaDataProvider API stub used by the intermediate compilation.
-                if (!GenerateTypeInfo())
+                if (!serviceSkipsTypeInfo && !GenerateTypeInfo())
                 {
                     return false;
                 }
@@ -1074,7 +1106,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                         {
                             return false;
                         }
-                        if (!GenerateSdkXbfFiles())
+                        if (!IsServiceCompile && !GenerateSdkXbfFiles())
                         {
                             return false;
                         }
@@ -1116,7 +1148,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
 
                 RemoveLmrAssemblyResolveHandler();
-                if (shouldVerifyWorkDone == true)
+                if (shouldVerifyWorkDone == true && !IsServiceCompile)
                 {
                     bool isDone = VerifyWorkDone();
                     Debug.Assert(isDone, "VerifyWorkDone checked failed");
@@ -1343,6 +1375,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         /// </summary>
         public void UnloadReferences()
         {
+            s_serviceLocalAssembly = null;
             if (s_typeUniverse != null)
             {
                 // We'll enable this in the future if needed.
@@ -1368,10 +1401,28 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             // DO NOT LOAD systemExtraReferenceItems
             _systemExtraReferenceItems = systemExtraReferenceItems;
 
+            if (IsServiceCompile && s_serviceLocalAssembly != null)
+            {
+                // Each compile sees only the newest build of the project's assembly, and pass 1 none, as in a build.
+                s_typeResolver?.RemoveAssemblyFromTypeNameMap(s_serviceLocalAssembly);
+                DirectUI.ReflectionHelper.ReleaseAssembly(s_serviceLocalAssembly);
+                s_typeUniverse.UnloadAssembly(s_serviceLocalAssembly);
+                s_serviceLocalAssembly = null;
+            }
+
             if (LocalAssembly != null)
             {
                 _localAssemblyName = LocalAssembly.ItemSpec;
-                _localAssembly = LoadAssembly(_localAssemblyName);
+                if (IsServiceCompile)
+                {
+                    // Read in full, so the file isn't held open and a build can replace it.
+                    _localAssembly = s_serviceLocalAssembly = s_typeUniverse.LoadAssemblyFromImage(
+                        ServiceLocalAssemblyImage ?? File.ReadAllBytes(_localAssemblyName), _localAssemblyName);
+                }
+                else
+                {
+                    _localAssembly = LoadAssembly(_localAssemblyName);
+                }
                 _loadedNonSystemAssemblies.Add(_localAssembly);
             }
 
@@ -1642,6 +1693,31 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             return isTheSame;
         }
         #endregion
+
+        private List<string> TypeOrder()
+        {
+            return _typeInfoCollector.SchemaInfo.TypeTableFromAllAssemblies.Select(t => t.StandardName).ToList();
+        }
+
+        // Compiler service: where the outputs of the given XAML files start (folder and file name, up to the extension).
+        internal IEnumerable<string> OutputPrefixes(ISet<string> xamlFiles)
+        {
+            return SourceFileManager.ProjectXamlTaskItems
+                .Where(tif => xamlFiles.Contains(tif.SourceXamlFullPath))
+                .Select(tif => Path.Combine(tif.TargetFolder, tif.FileNameNoExtension) + ".");
+        }
+
+        // Compiler service, pass 2: the types and members this compile collected for XamlTypeInfo. If a page uses one that
+        // the XamlTypeInfo the app has doesn't contain, XamlTypeInfo has to be generated again.
+        internal HashSet<string> CollectedTypeInfo()
+        {
+            var keys = new HashSet<string>(TypeOrder(), StringComparer.Ordinal);
+            foreach (InternalXamlUserMemberInfo member in _typeInfoCollector?.SchemaInfo.UserMemberInfo ?? Enumerable.Empty<InternalXamlUserMemberInfo>())
+            {
+                keys.Add(member.DeclaringType.StandardName + "." + member.Name + ":" + member.Type?.StandardName);
+            }
+            return keys;
+        }
 
         bool GenerateTypeInfo()
         {

@@ -29,9 +29,12 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         public SavedStateManager SavedState { get; private set; }
         public List<TaskItemFilename> ClasslessXamlFiles { get; private set; }
         public string GeneratedFileExtension { get; private set; }
+        // The compiler service: the only XAML files (full paths) that are out of date.
+        public ISet<string> ServiceFiles { get; private set; }
         public SourceFileManager(CompileXamlInternal compiler)
         {
             IsPass1 = compiler.IsPass1;
+            ServiceFiles = compiler.ServiceFiles;
             SavedState = compiler.SaveState;
             XbfGenerationIsDisabled = compiler.DisableXbfGeneration;
             ProjectFolderFullpath = compiler.ProjectFolderFullpath;
