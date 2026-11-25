@@ -190,6 +190,50 @@ namespace UnitTests
             StringAssert.Contains((string)diagnostics[0].GetType().GetProperty("Message").GetValue(diagnostics[0]), "design-time build");
         }
 
+        [TestMethod]
+        public void HotReloadService_KeepsTheBuildsXamlTypeInfoMemberOrder()
+        {
+            // A build that regenerated some pages can order XamlTypeInfo's members differently from a compile of every page;
+            // the service keeps the build's order, so the accessors are numbered as in the app.
+            const string xaml = @"
+<Page x:Class='MyStuff.MyPage' xmlns='http://schemas.microsoft.com/winfx/2006/xaml/presentation' xmlns:x='http://schemas.microsoft.com/winfx/2006/xaml' xmlns:lib='using:LibManagedDll'>
+    <Page.Resources>
+        <lib:MyStringListClass x:Key='a' MyListCount='1' />
+        <lib:MyDictionaryClass x:Key='b' MyDictionaryCount='2' />
+    </Page.Resources>
+</Page>";
+            DirectUISchemaContext schema = _testHelper.LoadSchema(SchemaMode.ManagedRuntime | SchemaMode.LoadUserDll);
+            object schemaInfo = _testHelper.CollectTypes(xaml, schema).SchemaInfo.Instance;
+            MethodInfo memberKey = schemaInfo.GetType().GetMethod("MemberKey", BindingFlags.NonPublic | BindingFlags.Static);
+            Func<List<string>> order = () => ((System.Collections.IEnumerable)schemaInfo.GetType().GetProperty("UserMemberInfo").GetValue(schemaInfo))
+                .Cast<object>().Select(m => (string)memberKey.Invoke(null, new[] { m })).ToList();
+            List<string> found = order();
+            CollectionAssert.IsSubsetOf(new[] { "LibManagedDll.MyStringListClass.MyListCount", "LibManagedDll.MyDictionaryClass.MyDictionaryCount" }, found);
+
+            // The build's order: the same members, reversed; and one the build didn't have (it goes last).
+            var build = Enumerable.Reverse(found.Skip(1)).ToList();
+            schemaInfo.GetType().GetMethod("KeepMemberOrder", BindingFlags.NonPublic | BindingFlags.Instance).Invoke(schemaInfo, new object[] { build });
+
+            CollectionAssert.AreEqual(build.Concat(found.Take(1)).ToList(), order());
+            var context = new CodeGeneratorProjectContext(new Version(KnownVersions.Latest), "HotReloadMemberOrder");
+            string code = string.Join(Environment.NewLine, _testHelper.GenerateTypeInfo(false, new XamlSchemaCodeInfo(schemaInfo), context.ProjectInfo,
+                new ClassName("MyStuff.App"), CodeGenLanguage.CSharp).Select(f => f.Contents));
+            List<string> kept = order();
+            for (int i = 0; i < kept.Count; i++)
+            {
+                string name = kept[i].Substring(kept[i].LastIndexOf('.') + 1);
+                Assert.IsTrue(Regex.IsMatch(code, $@"private object get_{i}_\w*_{name}\("), $"accessor {i} should be {kept[i]}");
+            }
+
+            // A type lists its members (AddMemberName) in the same order.
+            string firstType = kept[0].Substring(0, kept[0].LastIndexOf('.'));
+            List<string> added = Regex.Matches(code, @"AddMemberName\(""(\w+)""\)").Cast<Match>().Select(m => m.Groups[1].Value).ToList();
+            List<string> typeMembers = kept.Where(k => k.StartsWith(firstType + ".", StringComparison.Ordinal)).Select(k => k.Substring(firstType.Length + 1))
+                .Where(n => added.Count(a => a == n) == 1).ToList();
+            Assert.IsTrue(typeMembers.Count > 1, string.Join(", ", kept));
+            CollectionAssert.AreEqual(typeMembers, added.Where(typeMembers.Contains).ToList());
+        }
+
         private static byte[] CompileImage(string code)
         {
             CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },

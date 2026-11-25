@@ -155,6 +155,38 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
         }
 
+        // The same for members (see MemberKey): a member's accessors in XamlTypeInfo are numbered by its place in this
+        // list. The order depends on which pages a compile generated code for, so a build that regenerated one page and a
+        // compile of every page number the same members differently.
+        internal void KeepMemberOrder(IList<string> previousOrder)
+        {
+            var rank = new Dictionary<string, int>(StringComparer.Ordinal);
+            for (int i = previousOrder.Count - 1; i >= 0; i--)
+            {
+                rank[previousOrder[i]] = i;
+            }
+            List<InternalXamlUserMemberInfo> ordered = _userMemberInfo
+                .Select((member, found) => (member, found))
+                .OrderBy(m => rank.TryGetValue(MemberKey(m.member), out int r) ? r : previousOrder.Count + m.found)
+                .Select(m => m.member)
+                .ToList();
+            _userMemberInfo.Clear();
+            _userMemberInfo.AddRange(ordered);
+
+            // Each type lists its members in the order they were added to this list.
+            foreach (InternalTypeEntry type in _typeTable.Where(t => t.UserTypeInfo != null && t.UserTypeInfo.Members.Count > 1))
+            {
+                List<InternalXamlUserMemberInfo> members = type.UserTypeInfo.Members.OrderBy(m => _userMemberInfo.IndexOf(m)).ToList();
+                type.UserTypeInfo.Members.Clear();
+                type.UserTypeInfo.Members.AddRange(members);
+            }
+        }
+
+        internal static string MemberKey(InternalXamlUserMemberInfo member)
+        {
+            return member.DeclaringType.StandardName + "." + member.Name;
+        }
+
         public bool TryFindType(string systemName, out InternalTypeEntry type)
         {
             foreach (InternalTypeEntry ixType in _typeTable)

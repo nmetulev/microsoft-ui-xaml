@@ -15,6 +15,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     //
     //   <hash of the class name>.ids   each page's connection ID keys (see ConnectionIdKeys)
     //   typeinfo.txt                   the order of the types in XamlTypeInfo
+    //   members.txt                    the order of the members in XamlTypeInfo (their accessors are numbered by it)
     //   code\<hash of the path>.cs     a copy of each generated C# file the build compiled into the app: the members the
     //                                  app has (see KeptMembers). The generated files themselves don't say that once
     //                                  another build has started: pass 1 empties <Page>.g.cs, and design-time builds
@@ -56,6 +57,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             set { Set(TypeOrderPath(_folder), value); }
         }
 
+        // The member order of the XamlTypeInfo the app has.
+        public IList<string> MemberOrder
+        {
+            get { return Get(MemberOrderPath(_folder), path => ReadLines(path)?.ToList() ?? new List<string>()); }
+            set { Set(MemberOrderPath(_folder), value); }
+        }
+
         // The text of a generated file as the app has it: the build's copy, then each compile's output.
         public string GeneratedText(string buildPath)
         {
@@ -87,6 +95,18 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             WriteIfChanged(TypeOrderPath(folder), typeNames);
         }
 
+        public static void WriteMemberOrder(string folder, IEnumerable<string> memberKeys)
+        {
+            WriteIfChanged(MemberOrderPath(folder), memberKeys);
+        }
+
+        // State from a compiler that recorded the type order but not the member order.
+        public static bool LacksMemberOrder(string outputFolder)
+        {
+            string folder = FolderOf(outputFolder);
+            return File.Exists(TypeOrderPath(folder)) && !File.Exists(MemberOrderPath(folder));
+        }
+
         private static string ConnectionIdsPath(string folder, string className)
         {
             return Path.Combine(folder, Hash(className) + ".ids");
@@ -110,6 +130,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         }
 
         private static string TypeOrderPath(string folder) => Path.Combine(folder, "typeinfo.txt");
+
+        private static string MemberOrderPath(string folder) => Path.Combine(folder, "members.txt");
 
         private static Dictionary<string, int> ReadConnectionIds(string path)
         {

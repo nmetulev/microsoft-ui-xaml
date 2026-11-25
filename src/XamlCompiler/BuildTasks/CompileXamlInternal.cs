@@ -900,9 +900,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 SourceFileManager.MarkApplicationFilesDirty();
             }
             // A build whose hot reload state doesn't match EnableXamlHotReloadCodegen (it was just turned on or off, or the
-            // state is from a compiler that didn't copy the generated code) regenerates every page.
+            // state is from a compiler that recorded less) regenerates every page.
             bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild && (IsHotReloadCodegen
-                ? !Directory.Exists(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath))
+                ? !Directory.Exists(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath)) || XamlHotReloadHistory.LacksMemberOrder(OutputFolderFullpath)
                 : Directory.Exists(XamlHotReloadHistory.FolderOf(OutputFolderFullpath)));
 
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
@@ -1737,6 +1737,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             if (!ShouldSuppressTypeInfoCodeGen())
             {
                 XamlHotReloadHistory.WriteTypeOrder(folder, TypeOrder());
+                XamlHotReloadHistory.WriteMemberOrder(folder, MemberOrder());
             }
 
             // The generated C# this build compiled into the app (pass 1's files are unchanged since pass 1 wrote them).
@@ -1754,6 +1755,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private List<string> TypeOrder()
         {
             return _typeInfoCollector.SchemaInfo.TypeTableFromAllAssemblies.Select(t => t.StandardName).ToList();
+        }
+
+        private List<string> MemberOrder()
+        {
+            return _typeInfoCollector.SchemaInfo.UserMemberInfo.Select(XamlSchemaCodeInfo.MemberKey).ToList();
         }
 
         // Compiler service: where the outputs of the given XAML files start (folder and file name, up to the extension).
@@ -1794,11 +1800,13 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 if (keepsTypeOrder)
                 {
                     _typeInfoCollector.SchemaInfo.KeepTypeOrder(ServiceHistory.TypeOrder);
+                    _typeInfoCollector.SchemaInfo.KeepMemberOrder(ServiceHistory.MemberOrder);
                 }
                 codeFiles = _codeGenerator.GenerateTypeInfo(_typeInfoCollector.AppXamlInfo);
                 if (keepsTypeOrder)
                 {
                     ServiceHistory.TypeOrder = TypeOrder();
+                    ServiceHistory.MemberOrder = MemberOrder();
                 }
             }
             PerformanceUtility.FireCodeMarker(CodeMarkerEvent.perfXC_GenerateTypeInfoEnd);

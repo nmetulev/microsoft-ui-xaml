@@ -59,11 +59,11 @@ C# projects. A hot reload tool sets it on its own builds; the service uses whate
 | No `= false` initializers on static fields | A static initializer adds a static constructor, and Roslyn fails to update the static constructor of a class that an earlier update added |
 | `InitializeComponent` can run again | A tool can reset `_contentLoaded` and call it again on a live object: the previous compiled bindings stop (`StopTracking`) and the new ones start (`Update`), since a loaded element doesn't raise `Loading` again. Replaced Bindings objects ignore later `Loading`/`Activated` events |
 | `XamlTypeInfo` has a `MetadataUpdateHandler` | After an update, .NET hot reload calls `XamlTypeInfoProvider.ClearCache`; the provider then forgets what it looked up, so types and members an update added are found |
-| The service keeps the `XamlTypeInfo` type order | New types go at the end, so adding a type doesn't renumber the others |
+| The service keeps the `XamlTypeInfo` type and member order | New types and members go at the end, so adding one doesn't renumber the others, and a fresh service numbers member accessors (`get_88_...`) as the app's build did. That order depends on which pages a build regenerated, so it can't be recomputed by compiling every page |
 | The service keeps members the new code no longer has | .NET hot reload can't remove a field or a type, and Roslyn fails to remove a method an earlier update added. Such members stay, with empty bodies, inside a `#pragma warning disable` block marked "Kept by XAML hot reload" |
 
 A build with the property also writes `obj\...\XamlHotReload\`: one `<hash>.ids` file per page (connection ID keys),
-`typeinfo.txt` (the type order), and `code\<hash>.cs`, a copy of each generated C# file the build compiled into the app.
+`typeinfo.txt` and `members.txt` (the type and member order), and `code\<hash>.cs`, a copy of each generated C# file the build compiled into the app.
 The service takes the members the app has from those copies, never from `<Page>.g.cs`: the next build's pass 1 empties
 that file, and an editor's design-time builds into the same folder rewrite it. A build only writes these files and never
 reads them, so its output doesn't depend on earlier builds. Turning the property on or off regenerates every page.
