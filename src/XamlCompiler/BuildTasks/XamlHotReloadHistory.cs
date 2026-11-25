@@ -30,6 +30,10 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     // build the session continues; a session of another build is deleted. A service
     // started again on the same build (after a crash, or by another tool) carries on where the previous one stopped.
     //
+    // A build without the property leaves XamlHotReload\ alone: an app started from an earlier build with the property may
+    // still be running, and the service continues its session. It deletes XamlHotReloadCodegen.txt (next to the folder),
+    // which says the generated code is hot reload codegen, so the build after it regenerates every page.
+    //
     // A build only writes its files and never reads them or session\, so its output doesn't depend on an earlier build or
     // session. The service never writes the build's files. Every file is replaced in one step, and read with sharing that
     // allows that, so a build can run while the service is running.
@@ -177,12 +181,36 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             WriteIfChanged(Path.Combine(folder, BaselineName), Guid.NewGuid().ToString("N"));
         }
 
-        // State from a compiler that recorded the type order but not the member order.
-        public static bool LacksMemberOrder(string outputFolder)
+        // Whether the generated code in outputFolder (from the last build) is of the other kind than this build makes, so
+        // every page is generated again: hot reload codegen without the property, plain codegen with it, or state from a
+        // compiler that recorded less.
+        public static bool DoesCodegenDiffer(string outputFolder, bool hotReloadCodegen)
         {
+            if (!hotReloadCodegen)
+            {
+                return File.Exists(CodegenMarkerOf(outputFolder));
+            }
             string folder = FolderOf(outputFolder);
-            return File.Exists(Path.Combine(folder, TypeOrderName)) && !File.Exists(Path.Combine(folder, MemberOrderName));
+            return !File.Exists(CodegenMarkerOf(outputFolder)) || !Directory.Exists(CodeFolderOf(outputFolder)) ||
+                (File.Exists(Path.Combine(folder, TypeOrderName)) && !File.Exists(Path.Combine(folder, MemberOrderName)));
         }
+
+        // At the end of a build. The marker sits next to XamlHotReload\, not in it: a build without the property never touches
+        // that folder, since the app that the service is updating may have been started from an earlier build with it.
+        public static void SetCodegen(string outputFolder, bool hotReloadCodegen)
+        {
+            string marker = CodegenMarkerOf(outputFolder);
+            if (hotReloadCodegen)
+            {
+                WriteIfChanged(marker, "This folder's generated XAML code is hot reload codegen (EnableXamlHotReloadCodegen).\n");
+            }
+            else if (File.Exists(marker))
+            {
+                File.Delete(marker);
+            }
+        }
+
+        private static string CodegenMarkerOf(string outputFolder) => Path.Combine(outputFolder, "XamlHotReloadCodegen.txt");
 
         private const string BaselineName = "build.txt";
         private const string TypeOrderName = "typeinfo.txt";

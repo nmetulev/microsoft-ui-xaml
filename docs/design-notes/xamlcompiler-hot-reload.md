@@ -66,7 +66,9 @@ A build with the property also writes `obj\...\XamlHotReload\`: one `<hash>.ids`
 `typeinfo.txt` and `members.txt` (the type and member order), and `code\<hash>.cs`, a copy of each generated C# file the build compiled into the app.
 The service takes the members the app has from those copies, never from `<Page>.g.cs`: the next build's pass 1 empties
 that file, and an editor's design-time builds into the same folder rewrite it. A build only writes these files and never
-reads them, so its output doesn't depend on earlier builds. Turning the property on or off regenerates every page.
+reads them, so its output doesn't depend on earlier builds. Turning the property on or off regenerates every page (the build
+notes which kind of code is in `obj` in `XamlHotReloadCodegen.txt`, next to the folder). A build without the property
+leaves `XamlHotReload\` alone: a watch session may still depend on it.
 
 The build also writes `build.txt`, a new ID per build. After every compile the service writes `XamlHotReload\session\`:
 everything the running app depends on that the session changed (the IDs it gave new elements, the generated code the app

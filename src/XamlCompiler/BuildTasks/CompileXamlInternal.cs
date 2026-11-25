@@ -901,9 +901,8 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             }
             // A build whose hot reload state doesn't match EnableXamlHotReloadCodegen (it was just turned on or off, or the
             // state is from a compiler that recorded less) regenerates every page.
-            bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild && (IsHotReloadCodegen
-                ? !Directory.Exists(XamlHotReloadHistory.CodeFolderOf(OutputFolderFullpath)) || XamlHotReloadHistory.LacksMemberOrder(OutputFolderFullpath)
-                : Directory.Exists(XamlHotReloadHistory.FolderOf(OutputFolderFullpath)));
+            bool didHotReloadCodegenChange = !IsServiceCompile && !IsDesignTimeBuild &&
+                XamlHotReloadHistory.DoesCodegenDiffer(OutputFolderFullpath, IsHotReloadCodegen);
 
             // During Pass 2, we can skip most type info collection if type info reflection is enabled since we don't need our type tables.
             bool skipPass2TypeInfo = EnableTypeInfoReflection;
@@ -1717,18 +1716,16 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         #endregion
 
         // EnableXamlHotReloadCodegen: what a build records for the compiler service (see XamlHotReloadHistory). A build
-        // without it removes what an earlier build recorded.
+        // without it leaves that alone (a running app may depend on it) and only notes that the code is no longer hot reload
+        // codegen.
         private void UpdateHotReloadState()
         {
-            string folder = XamlHotReloadHistory.FolderOf(OutputFolderFullpath);
             if (!IsHotReloadCodegen)
             {
-                if (Directory.Exists(folder))
-                {
-                    Directory.Delete(folder, recursive: true);
-                }
+                XamlHotReloadHistory.SetCodegen(OutputFolderFullpath, false);
                 return;
             }
+            string folder = XamlHotReloadHistory.FolderOf(OutputFolderFullpath);
             Directory.CreateDirectory(folder);
             foreach (XamlClassCodeInfo classCodeInfo in _classCodeInfos.Values.Where(c => c.ConnectionIdKeys != null))
             {
@@ -1751,6 +1748,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 File.Delete(stale);
             }
             XamlHotReloadHistory.WriteBaseline(folder);
+            XamlHotReloadHistory.SetCodegen(OutputFolderFullpath, true);
         }
 
         private List<string> TypeOrder()

@@ -297,6 +297,51 @@ namespace UnitTests
             }
         }
 
+        [TestMethod]
+        public void HotReloadService_ABuildWithoutThePropertyLeavesTheSessionAlone()
+        {
+            string outputFolder = Path.Combine(Path.GetTempPath(), "HotReloadTests", Guid.NewGuid().ToString("N"));
+            string folder = Path.Combine(outputFolder, "XamlHotReload");
+            string page = Path.Combine(outputFolder, "MainPage.g.cs");
+            var history = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.XamlHotReloadHistory");
+            MethodInfo differs = history.GetStaticMethod("DoesCodegenDiffer");
+            MethodInfo setCodegen = history.GetStaticMethod("SetCodegen");
+            Func<string> snapshot = () => string.Join("\n", Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).OrderBy(f => f)
+                .Select(f => f.Substring(folder.Length) + "=" + File.ReadAllText(f) + "@" + File.GetLastWriteTimeUtc(f).Ticks));
+            try
+            {
+                // A build with the property, then a compile in its session.
+                Directory.CreateDirectory(outputFolder);
+                Assert.IsTrue((bool)differs.Invoke(null, new object[] { outputFolder, true }), "the first build with the property regenerates every page");
+                history.GetStaticMethod("WriteTypeOrder").Invoke(null, new object[] { folder, new[] { "App.MainPage" } });
+                history.GetStaticMethod("WriteMemberOrder").Invoke(null, new object[] { folder, new[] { "App.MainPage.Title" } });
+                File.WriteAllText(page, "build code");
+                history.GetStaticMethod("WriteGeneratedText").Invoke(null, new object[] { outputFolder, page });
+                history.GetStaticMethod("WriteBaseline").Invoke(null, new object[] { folder });
+                setCodegen.Invoke(null, new object[] { outputFolder, true });
+                object service = history.CreateInstance(new object[] { outputFolder });
+                service.GetType().GetMethod("SetGeneratedText").Invoke(service, new object[] { page, "session code" });
+                service.GetType().GetMethod("Save").Invoke(service, null);
+                Assert.IsFalse((bool)differs.Invoke(null, new object[] { outputFolder, true }));
+                string before = snapshot();
+
+                // A build without the property (the user's, or an editor's) regenerates every page but leaves the session.
+                Assert.IsTrue((bool)differs.Invoke(null, new object[] { outputFolder, false }));
+                setCodegen.Invoke(null, new object[] { outputFolder, false });
+                Assert.AreEqual(before, snapshot());
+                Assert.IsFalse((bool)differs.Invoke(null, new object[] { outputFolder, false }), "the next build without the property doesn't");
+                object restarted = history.CreateInstance(new object[] { outputFolder });
+                Assert.AreEqual("session code", restarted.GetType().GetMethod("GeneratedText").Invoke(restarted, new object[] { page }));
+
+                // The next build with the property regenerates every page again.
+                Assert.IsTrue((bool)differs.Invoke(null, new object[] { outputFolder, true }));
+            }
+            finally
+            {
+                Directory.Delete(outputFolder, recursive: true);
+            }
+        }
+
         private static byte[] CompileImage(string code)
         {
             CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },
