@@ -14,7 +14,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
     // the same results as the project's build. XamlCompiler.exe --serve runs one (docs\design-notes\xamlcompiler-hot-reload.md).
     //
     // It starts from the pass 2 inputs the build wrote (obj\...\input.json). Compiles write to the service's own folder,
-    // never to the build's, and each result names a file by where the build puts it.
+    // never to the build's files, and each result names a file by where the build puts it. With EnableXamlHotReloadCodegen,
+    // what the running app depends on is also saved after every compile (XamlHotReloadHistory), so a service started again
+    // on the same build continues the session.
     internal sealed class XamlCompilerService
     {
         private readonly CompilerInputs _inputs;
@@ -25,8 +27,11 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
         private readonly SavedStateManager _savedState;
         private readonly XamlHotReloadHistory _history;
 
-        // The types and members in the app's XamlTypeInfo. Null until a pass 2 has read every page.
+        // Without EnableXamlHotReloadCodegen (no _history): see KnownTypeInfo.
         private HashSet<string> _typeInfo;
+
+        // Pages the service added (relative to the project).
+        private readonly List<string> _addedPages = new List<string>();
 
         // Why the inputs can't be compiled from, or null.
         private readonly string _inputsError;
@@ -88,19 +93,19 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 return result;
             }
-            ISet<string> known = AllXamlFiles();
-            foreach (string file in files.Where(f => !known.Contains(f)))
+            // A build since the last compile starts the session again; a service started on the build that an earlier one
+            // was serving carries on its session (XamlHotReloadHistory).
+            _history?.Refresh();
+            var pages = (_history?.AddedPages ?? Enumerable.Empty<string>()).Concat(_addedPages)
+                .Select(f => Path.GetFullPath(Path.Combine(_projectFolder, f))).Concat(files)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (string file in pages)
             {
-                _inputs.XamlPages.Add(new MSBuildItem
-                {
-                    ItemSpec = Utilities.FileHelpers.GetRelativePath(_projectFolder, file),
-                    FullPath = file,
-                    DependentUpon = string.Empty,
-                    MSBuild_Link = string.Empty,
-                    MSBuild_TargetPath = string.Empty,
-                    MSBuild_XamlResourceMapName = string.Empty,
-                    MSBuild_XamlComponentResourceLocation = string.Empty,
-                });
+                AddPage(file);
+            }
+            if (_history != null && !_history.AddedPages.SequenceEqual(_addedPages, StringComparer.OrdinalIgnoreCase))
+            {
+                _history.AddedPages = _addedPages.ToList();
             }
 
             if (pass == 1)
@@ -111,9 +116,9 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 // Only a compile of every page generates XamlTypeInfo as a build does: pages add types to it while their
                 // code is generated. The first pass 2 does that, so the service knows what the app's XamlTypeInfo has.
-                bool generateTypeInfo = _typeInfo == null;
+                bool generateTypeInfo = KnownTypeInfo == null;
                 result = Run(isPass1: false, files, localAssemblyImage, generateTypeInfo, out HashSet<string> typeInfo);
-                if (result.Success && !generateTypeInfo && !typeInfo.IsSubsetOf(_typeInfo))
+                if (result.Success && !generateTypeInfo && !typeInfo.IsSubsetOf(KnownTypeInfo))
                 {
                     // The pages use a type or member the app's XamlTypeInfo doesn't have.
                     generateTypeInfo = true;
@@ -121,11 +126,58 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
                 }
                 if (result.Success && generateTypeInfo)
                 {
-                    _typeInfo = typeInfo;
+                    KnownTypeInfo = typeInfo;
                 }
             }
+            _history?.Save();
             result.ElapsedMs = clock.Elapsed.TotalMilliseconds;
             return result;
+        }
+
+        // The types and members in the app's XamlTypeInfo. Null until a pass 2 has read every page.
+        private HashSet<string> KnownTypeInfo
+        {
+            get { return _history != null ? _history.KnownTypeInfo : _typeInfo; }
+            set
+            {
+                if (_history != null)
+                {
+                    _history.KnownTypeInfo = value;
+                }
+                else
+                {
+                    _typeInfo = value;
+                }
+            }
+        }
+
+        // Adds an existing XAML file the build's inputs don't list as a page; forgets an added page whose file was deleted.
+        private void AddPage(string file)
+        {
+            string relative = Utilities.FileHelpers.GetRelativePath(_projectFolder, file);
+            if (!File.Exists(file))
+            {
+                if (_addedPages.RemoveAll(p => string.Equals(p, relative, StringComparison.OrdinalIgnoreCase)) > 0)
+                {
+                    _inputs.XamlPages.RemoveAll(p => string.Equals(p.ItemSpec, relative, StringComparison.OrdinalIgnoreCase));
+                }
+                return;
+            }
+            if (AllXamlFiles().Contains(file))
+            {
+                return;
+            }
+            _addedPages.Add(relative);
+            _inputs.XamlPages.Add(new MSBuildItem
+            {
+                ItemSpec = relative,
+                FullPath = file,
+                DependentUpon = string.Empty,
+                MSBuild_Link = string.Empty,
+                MSBuild_TargetPath = string.Empty,
+                MSBuild_XamlResourceMapName = string.Empty,
+                MSBuild_XamlComponentResourceLocation = string.Empty,
+            });
         }
 
         private XamlCompileResult Run(bool isPass1, ISet<string> files, byte[] localAssemblyImage, bool generateTypeInfo, out HashSet<string> typeInfo)

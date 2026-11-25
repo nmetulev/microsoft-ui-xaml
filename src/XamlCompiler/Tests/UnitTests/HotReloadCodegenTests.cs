@@ -234,6 +234,69 @@ namespace UnitTests
             CollectionAssert.AreEqual(typeMembers, added.Where(typeMembers.Contains).ToList());
         }
 
+        [TestMethod]
+        public void HotReloadService_ARestartedServiceContinuesTheSession()
+        {
+            string outputFolder = Path.Combine(Path.GetTempPath(), "HotReloadTests", Guid.NewGuid().ToString("N"));
+            string page = Path.Combine(outputFolder, "MainPage.g.cs");
+            var history = new ProxyHelper("Microsoft.UI.Xaml.Markup.Compiler.XamlHotReloadHistory");
+            string folder = Path.Combine(outputFolder, "XamlHotReload");
+            Action build = () =>
+            {
+                history.GetStaticMethod("WriteConnectionIds").Invoke(null, new object[] { folder, "App.MainPage", new Dictionary<string, int> { { "/Grid", 1 }, { "/Button", 2 } } });
+                history.GetStaticMethod("WriteTypeOrder").Invoke(null, new object[] { folder, new[] { "App.MainPage" } });
+                history.GetStaticMethod("WriteMemberOrder").Invoke(null, new object[] { folder, new[] { "App.MainPage.Title" } });
+                File.WriteAllText(page, "build code");
+                history.GetStaticMethod("WriteGeneratedText").Invoke(null, new object[] { outputFolder, page });
+                history.GetStaticMethod("WriteBaseline").Invoke(null, new object[] { folder });
+            };
+            Func<object, string> state = h =>
+            {
+                Type t = h.GetType();
+                var ids = (Dictionary<string, int>)t.GetMethod("ConnectionIds").Invoke(h, new object[] { "App.MainPage" });
+                var known = (HashSet<string>)t.GetProperty("KnownTypeInfo").GetValue(h);
+                return string.Join(" | ",
+                    string.Join(",", ids.OrderBy(p => p.Value).Select(p => p.Key + "=" + p.Value)),
+                    string.Join(",", (IList<string>)t.GetProperty("TypeOrder").GetValue(h)),
+                    string.Join(",", (IList<string>)t.GetProperty("MemberOrder").GetValue(h)),
+                    (string)t.GetMethod("GeneratedText").Invoke(h, new object[] { page }),
+                    known == null ? "(no type info)" : string.Join(",", known.OrderBy(k => k)),
+                    string.Join(",", (IList<string>)t.GetProperty("AddedPages").GetValue(h)));
+            };
+            try
+            {
+                Directory.CreateDirectory(outputFolder);
+                build();
+                string built = state(history.CreateInstance(new object[] { outputFolder }));
+
+                // Service A: a new element, a new type and member, kept members, regenerated XamlTypeInfo, a new page.
+                object a = history.CreateInstance(new object[] { outputFolder });
+                Type type = a.GetType();
+                ((Dictionary<string, int>)type.GetMethod("ConnectionIds").Invoke(a, new object[] { "App.MainPage" }))["/TextBlock"] = 3;
+                type.GetProperty("TypeOrder").SetValue(a, new List<string> { "App.MainPage", "App.Badge" });
+                type.GetProperty("MemberOrder").SetValue(a, new List<string> { "App.MainPage.Title", "App.Badge.Label" });
+                type.GetMethod("SetGeneratedText").Invoke(a, new object[] { page, "session code" });
+                type.GetProperty("KnownTypeInfo").SetValue(a, new HashSet<string> { "App.MainPage", "App.Badge" });
+                type.GetProperty("AddedPages").SetValue(a, new List<string> { "Badge.xaml" });
+                type.GetMethod("Save").Invoke(a, null);
+                string session = state(a);
+                Assert.AreEqual("/Grid=1,/Button=2,/TextBlock=3 | App.MainPage,App.Badge | App.MainPage.Title,App.Badge.Label | session code | App.Badge,App.MainPage | Badge.xaml", session);
+
+                // Service B, started on the same build after A stopped, carries on A's session.
+                Assert.AreEqual(session, state(history.CreateInstance(new object[] { outputFolder })));
+
+                // A new build starts a new session, in a new service and in A.
+                build();
+                Assert.AreEqual(built, state(history.CreateInstance(new object[] { outputFolder })));
+                type.GetMethod("Refresh").Invoke(a, null);
+                Assert.AreEqual(built, state(a));
+            }
+            finally
+            {
+                Directory.Delete(outputFolder, recursive: true);
+            }
+        }
+
         private static byte[] CompileImage(string code)
         {
             CSharpCompilation compilation = CSharpCompilation.Create("App", new[] { CSharpSyntaxTree.ParseText(code) },

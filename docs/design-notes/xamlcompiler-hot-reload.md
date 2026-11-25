@@ -43,9 +43,9 @@ XamlCompiler.exe --serve <input.json>
 
 ### Running next to a build
 
-The service only reads the build's files. It loads assemblies into memory instead of keeping them open, and its own
-output folder is under `%TEMP%`. So a build can run while the service is running, and the service picks up what the
-build wrote: when a build rewrites a file the service depends on, the service starts again from the new file.
+The service never writes the build's files. It loads assemblies into memory instead of keeping them open, its own
+output folder is under `%TEMP%`, and the only thing it writes in `obj` is its session state (below). So a build can run
+while the service is running. A build starts a new session: the app is restarted from it.
 
 ## Hot reload code generation
 
@@ -68,6 +68,12 @@ The service takes the members the app has from those copies, never from `<Page>.
 that file, and an editor's design-time builds into the same folder rewrite it. A build only writes these files and never
 reads them, so its output doesn't depend on earlier builds. Turning the property on or off regenerates every page.
 
+The build also writes `build.txt`, a new ID per build. After every compile the service writes `XamlHotReload\session\`:
+everything the running app depends on that the session changed (the IDs it gave new elements, the generated code the app
+now has, the type and member order and contents of the `XamlTypeInfo` it returned, the pages it added), each tagged with
+the `build.txt` it continues. A service started again on the same build (after a crash or a restart) carries on exactly
+where the previous one stopped; after a new build, the session files are ignored.
+
 ### What a host does
 
 - Start the service after a build of the project with the property, from that build's `input.json`. An editor's
@@ -76,7 +82,8 @@ reads them, so its output doesn't depend on earlier builds. Turning the property
 - On a save: pass 1 for the changed pages, compile the C# (the tool's own Roslyn workspace), pass 2 with the new
   assembly image, then apply the C# update and hand the `.xbf` to WinUI.
 - After applying an update, call the app's `MetadataUpdateHandler`s (`ClearCache`), as `dotnet watch` does.
-- After restarting the app from a new build, nothing: the service notices the build's new files.
+- After restarting the app from a new build, nothing: the service notices the build's new `build.txt`.
+- After the service exits or is killed, start another on the same build's inputs; it continues the session.
 
 ### Limits
 

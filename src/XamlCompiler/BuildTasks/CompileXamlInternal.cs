@@ -1750,6 +1750,7 @@ namespace Microsoft.UI.Xaml.Markup.Compiler
             {
                 File.Delete(stale);
             }
+            XamlHotReloadHistory.WriteBaseline(folder);
         }
 
         private List<string> TypeOrder()
